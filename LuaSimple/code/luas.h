@@ -1,16 +1,17 @@
 #pragma once
 
-#define USE_WINDOWS_DEBUG 1
+#define USE_DEBUG 1
 
-#if USE_WINDOWS_DEBUG
+#if USE_DEBUG
 #include <windows.h>
+#include <dbghelp.h>
+#include <psapi.h>
+
+#include <iostream>
 #endif
 
 #include <intrin.h>
-#include <iostream>
 #include <type_traits>
-#include <DbgHelp.h>
-#include <psapi.h>
 #include <format>
 
 #include <lua/lua.hpp>
