@@ -396,7 +396,7 @@ namespace luas
 	};
 
 	template <typename Fn>
-	struct fn_caller
+	struct lua_c_caller
 	{
 		template <typename... A, typename... In>
 		static int push_and_call_impl(state& _s, int nargs, [[maybe_unused]] int index, In&&... args) requires (detail::is_empty_args<A>)
@@ -564,7 +564,7 @@ namespace luas
 				static constexpr int expected_nargs = detail::fn_args_count_v<T>;
 
 				if (const int nargs = vm.get_top(); expected_nargs == nargs)
-					return fn_caller<T>::call(vm, nargs);
+					return lua_c_caller<T>::call(vm, nargs);
 				else return state::_throw_error(*vm, "Expected {} arguments, got {}", expected_nargs, nargs);
 			};
 
