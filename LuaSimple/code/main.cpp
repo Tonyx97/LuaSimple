@@ -71,14 +71,32 @@ local a = f1(1, test_f);
 
 	luas::ctx script;
 
+	struct Obj
+	{
+		int val = 0;
+	};
+
 	script.add_global("gv0", true);
 	script.add_global("gv1", 5.0);
 	script.add_global("gv2", -5.f);
 	script.add_global("gv3", "test string");
+	script.add_global("_int", new Obj{ 93834 });
 
-	script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::lua_fn& v1, luas::lua_fn& v2, bool b)
+	script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::variadic_args va)
 	{
-		printf_s("[addEvent] %s (%i), \n", name.c_str(), b);
+		printf_s("[addEvent] %s\n", name.c_str());
+		printf_s("variadic_args size: %i\n", va.size());
+		printf_s("variadic_args value %i: %i\n", 0, va.get<Obj*>(1)->val);
+
+		//for (int i = 0; i < va.values.size(); ++i)
+		//	printf_s("type: %s\n", va.values[i].type().name());
+
+		s.call_safe_fn("tick0", 0, "ye :o");
+	});
+
+	/*script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::lua_fn& v1, luas::lua_fn& v2, luas::variadic_args va)
+	{
+		printf_s("[addEvent] %s, \n", name.c_str());
 
 		s.call_safe_fn("tick0", 0, "ye :o");
 
@@ -87,7 +105,7 @@ local a = f1(1, test_f);
 
 		fn1 = std::move(v1);
 		fn2 = std::move(v2);
-	});
+	});*/
 
 	script.exec_string(R"(
 
@@ -110,7 +128,8 @@ function tick3(a, b)
 	print("gv3: " .. tostring(gv3));
 	print("a: " .. tostring(a));
 	print("b: " .. tostring(b));
-	addEvent("onTick", tick1, tick2, true);
+	addEvent("onTick", tick1, 1234.47, _int);
+	--addEvent("onTick", tick1, tick2, true);
 	return a - b;
 end
 
@@ -127,10 +146,10 @@ end
 		std::tuple<lua_Integer> v2 = script.call_safe<lua_Integer>("tick3", 10, 7);
 
 		printf_s(FORMATV("{}\n", std::get<0>(v2)).c_str());
-		printf_s("should print positive now:\n");
+		/*printf_s("should print positive now:\n");
 		printf_s("tick1 res: %i\n", std::get<0>(fn1.call<int>()));
 		printf_s("should print negative now:\n");
-		printf_s("tick2 res: %i\n", std::get<0>(fn2.call<int>(1, 1, 1)));
+		printf_s("tick2 res: %i\n", std::get<0>(fn2.call<int>(1, 1, 1)));*/
 
 		Sleep(0);
 	}

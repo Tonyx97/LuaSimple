@@ -11,8 +11,10 @@
 #endif
 
 #include <intrin.h>
-#include <type_traits>
 #include <format>
+#include <type_traits>
+#include <vector>
+#include <any>
 
 #include <lua/lua.hpp>
 
@@ -48,6 +50,7 @@ inline void check_fatal(bool condition, const char* text, A... args)
 namespace luas
 {
 	struct lua_fn;
+	class variadic_args;
 	class state;
 
 	namespace detail
@@ -66,6 +69,9 @@ namespace luas
 
 		template <typename T>
 		concept is_string_array = std::is_array_v<T> && std::is_same_v<std::remove_all_extents_t<std::remove_cvref_t<T>>, char>;
+
+		template <typename T>
+		concept is_string = std::is_same_v<T, std::string>;
 
 		template <typename T>
 		concept is_bool = std::is_same_v<T, bool>;
@@ -103,7 +109,7 @@ namespace luas
 		template <typename T>
 		static constexpr auto fn_args_count_v = fn_args_count<T>::value;
 
-		struct TupleIterator
+		struct tuple_iterator
 		{
 			template <typename Fn, typename... A>
 			static void iterate_impl(const Fn& fn) requires (sizeof...(A) == 0) {}
@@ -147,6 +153,36 @@ namespace luas
 
 		template <typename T>
 		using function_type_v = function_type<T>::type;
+
+		template <typename V, typename... Args>
+		struct is_type_last_in_variadics
+		{
+			template <typename T, typename... A>
+			static constexpr bool impl() requires (sizeof...(A) == 0) { return std::is_same_v<V, T>; }
+
+			template <typename T, typename... A>
+			static constexpr bool impl() { return impl<A...>(); }
+
+			static constexpr bool value() { return impl<Args...>(); }
+		};
+
+		template <typename V, typename... Args>
+		struct is_type_in_variadics
+		{
+			template <typename T, typename... A>
+			static constexpr bool impl() requires (sizeof...(A) == 0) { return false; }
+
+			template <typename T, typename... A>
+			static constexpr bool impl()
+			{
+				if constexpr (std::is_same_v<V, T>)
+					return true;
+
+				return impl<A...>();
+			}
+
+			static constexpr bool value() { return impl<Args...>(); }
+		};
 	}
 
 	namespace tuple
@@ -237,52 +273,25 @@ namespace luas
 		void _push(const T& value) requires(detail::is_userdata<DT> && !std::is_trivial_v<std::remove_pointer_t<DT>>) { lua_pushlightuserdata(_state, value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int index) requires(detail::is_bool<DT>)
-		{
-			if (!lua_isboolean(_state, index))
-				return _throw_error<DT>(_state, "Expected 'bool' value, got '{}'", LUA_GET_TYPENAME(index));
-
-			return static_cast<DT>(lua_toboolean(_state, index));
-		}
+		DT _pop(int& index) requires(detail::is_bool<DT>) { return to_bool(index++); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int index) requires(detail::is_integer<DT>)
-		{
-			if (!lua_isinteger(_state, index))
-				return _throw_error<DT>(_state, "Expected 'integer' value, got '{}'", LUA_GET_TYPENAME(index));
-
-			return static_cast<DT>(lua_tointeger(_state, index));
-		}
+		DT _pop(int& index) requires(detail::is_integer<DT>) { return static_cast<DT>(to_int(index++)); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int index) requires(std::is_floating_point_v<DT>)
-		{
-			if (!lua_isnumber(_state, index))
-				return _throw_error<DT>(_state, "Expected 'number' value, got '{}'", LUA_GET_TYPENAME(index));
-
-			return static_cast<DT>(lua_tonumber(_state, index));
-		}
+		DT _pop(int& index) requires(std::is_floating_point_v<DT>) { return static_cast<DT>(to_number(index++)); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int index) requires(std::is_same_v<DT, std::string>)
-		{
-			if (!lua_isstring(_state, index))
-				return _throw_error<DT>(_state, "Expected 'string' value, got '{}'", LUA_GET_TYPENAME(index));
-
-			return DT(lua_tostring(_state, index));
-		}
+		DT _pop(int& index) requires(detail::is_string<DT>) { return DT(to_string(index++)); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int index) requires(std::is_same_v<DT, lua_fn>);
+		DT _pop(int& index) requires(detail::is_userdata<DT>) { return to_userdata<DT>(index++); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int index) requires(detail::is_userdata<DT>)
-		{
-			if (!lua_isuserdata(_state, index))
-				return _throw_error<DT>(_state, "Expected '{}' value, got '{}'", typeid(DT).name(), LUA_GET_TYPENAME(index));
+		DT _pop(int& index) requires(std::is_same_v<DT, lua_fn>);
 
-			return std::bit_cast<DT>(lua_touserdata(_state, index));
-		}
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		DT _pop(int& index) requires(std::is_same_v<DT, variadic_args>);
 
 		void get_global(const std::string& name) { lua_getglobal(_state, name.c_str()); }
 
@@ -296,13 +305,24 @@ namespace luas
 			return false;
 		}
 
-		template <typename T>
-		void print_stack(int index)
+		void print_stack()
 		{
-			printf_s("\n--------(index %i)---------\n", index);
+			printf_s("\n------------ stack ------------\n");
+			
+			int top = lua_gettop(_state);
 
-			for (int i = -get_top(); i <= 0; ++i)
-				printf_s("%i: %s (%s)\n", i, LUA_GET_TYPENAME(i), lua_type(_state, i) == LUA_TSTRING ? lua_tostring(_state, i) : "");
+			for (int i = 1; i <= top; i++)
+			{
+				switch (int t = lua_type(_state, i))
+				{
+				case LUA_TSTRING: printf_s("\t'%s'", lua_tostring(_state, i)); break;
+				case LUA_TBOOLEAN: printf_s(lua_toboolean(_state, i) ? "\ttrue" : "\tfalse"); break;
+				case LUA_TNUMBER: printf_s("\t%g", lua_tonumber(_state, i)); break;
+				default: printf_s("\t%s", lua_typename(_state, t)); break;
+				}
+
+				printf_s("\n");
+			}
 		}
 
 	public:
@@ -310,6 +330,11 @@ namespace luas
 		state() {}
 		state(lua_State* _state) : _state(_state) {}
 		~state() { make_invalid(); }
+
+		lua_State* get() const { return _state; }
+		lua_State* operator * () const { return get(); }
+
+		operator bool() const { return !!_state; }
 
 		void set_panic()
 		{
@@ -326,31 +351,16 @@ namespace luas
 		void make_invalid() { _state = nullptr; }
 		void open_libs() { luaL_openlibs(_state); }
 		void set_global(const char* index) { lua_setglobal(_state, index); }
-
 		void unref(int v) { luaL_unref(_state, LUA_REGISTRYINDEX, v); }
 		void push_value(int index) { lua_pushvalue(_state, index); }
 
-		int ref() const { return luaL_ref(_state, LUA_REGISTRYINDEX); }
-		int get_raw(int i, int n) const { return lua_rawgeti(_state, i, n); }
-		int upvalue_index(int i) const { return lua_upvalueindex(i); }
-
-		template <typename T>
-		void push_c_closure(const T& value) { lua_pushcclosure(_state, value, 1); }
-
-		template <typename T>
-		T* new_userdata() { return static_cast<T*>(lua_newuserdata(_state, sizeof(T))); }
-
-		template <typename T>
-		T* to_userdata(int index) { return static_cast<T*>(lua_touserdata(_state, index)); }
-
+		void push() {}
+		void pop_n(int n) { lua_pop(_state, n); }
 		void exec_string(const std::string_view& code)
 		{
 			if (luaL_dostring(_state, code.data()) != 0)
 				throw_error(lua_tostring(_state, -1));
 		}
-
-		void push() {}
-		void pop_n(int n) { lua_pop(_state, n); }
 
 		template <typename T, typename... A>
 		void push(const T& value, A&&... args)
@@ -359,16 +369,74 @@ namespace luas
 			push(args...);
 		}
 
-		template <bool pop_it = true, typename T, typename DT = std::remove_cvref_t<T>>
-		DT pop(int index = -1)
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		DT pop(int& index)
+		{
+			return _pop<T>(index);
+		}
+
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		DT pop_i(int index = -1, bool stack_pop = true)
 		{
 			auto value = _pop<T>(index);
 
-			if (pop_it)
+			if (stack_pop)
 				pop_n(1);
 
 			return value;
 		}
+
+		int get_top() const { return lua_gettop(_state); }
+		int ref() const { return luaL_ref(_state, LUA_REGISTRYINDEX); }
+		int get_raw(int i, int n) const { return lua_rawgeti(_state, i, n); }
+		int upvalue_index(int i) const { return lua_upvalueindex(i); }
+
+		bool to_bool(int i)
+		{
+			if (!lua_isboolean(_state, i))
+				return _throw_error<bool>(_state, "Expected 'bool' value, got '{}'", LUA_GET_TYPENAME(i));
+
+			return !!lua_toboolean(_state, i);
+		}
+
+		lua_Integer to_int(int i)
+		{
+			if (!lua_isinteger(_state, i))
+				return _throw_error<lua_Integer>(_state, "Expected 'integer' value, got '{}'", LUA_GET_TYPENAME(i));
+
+			return lua_tointeger(_state, i);
+		}
+
+		lua_Number to_number(int i)
+		{
+			if (!lua_isnumber(_state, i))
+				return _throw_error<lua_Number>(_state, "Expected 'number' value, got '{}'", LUA_GET_TYPENAME(i));
+
+			return lua_tonumber(_state, i);
+		}
+
+		std::string to_string(int i)
+		{
+			if (!lua_isstring(_state, i))
+				return _throw_error<std::string>(_state, "Expected 'string' value, got '{}'", LUA_GET_TYPENAME(i));
+
+			return lua_tostring(_state, i);
+		}
+
+		template <typename T>
+		T to_userdata(int i)
+		{
+			if (!lua_isuserdata(_state, i))
+				return _throw_error<std::nullptr_t>(_state, "Expected '{}' value, got '{}'", typeid(T).name(), LUA_GET_TYPENAME(i));
+
+			return static_cast<T>(lua_touserdata(_state, i));
+		}
+
+		template <typename T>
+		void push_c_closure(const T& value) { lua_pushcclosure(_state, value, 1); }
+
+		template <typename T>
+		T* new_userdata() { return static_cast<T*>(lua_newuserdata(_state, sizeof(T))); }
 
 		template <typename... A>
 		bool call_safe_fn(const std::string& fn, int nreturns = 0, A&&... args)
@@ -386,13 +454,32 @@ namespace luas
 
 			return call_protected(sizeof...(A), nreturns);
 		}
+	};
 
-		int get_top() const { return lua_gettop(_state); }
+	class variadic_args
+	{
+	private:
 
-		lua_State* get() const { return _state; }
-		lua_State* operator * () const { return get(); }
+		state vm {};
 
-		operator bool() const { return !!_state; }
+		// storage for values indices
+
+		int first = 0,
+			last = 0,
+			current = 0;
+
+	public:
+
+		variadic_args(state* vm, int first, int last) : vm(vm->get()), first(first), last(last), current(first) {}
+		~variadic_args() { vm.make_invalid(); }
+
+		template <typename T>
+		T get(int i)
+		{
+			return vm.pop_i<T>(first + i + 1, false);
+		}
+
+		int size() const { return last - first; }
 	};
 
 	template <typename Fn>
@@ -404,7 +491,7 @@ namespace luas
 			using return_type = detail::fn_return_type_v<Fn>;
 
 			const auto pop_args = [&]() { if (nargs > 0) _s.pop_n(nargs); };
-			const auto fn = *_s.to_userdata<Fn>(_s.upvalue_index(1));
+			const auto fn = *_s.to_userdata<Fn*>(_s.upvalue_index(1));
 
 			if constexpr (std::is_void_v<return_type>)
 			{
@@ -439,22 +526,29 @@ namespace luas
 		template <typename T, typename... A, typename... In>
 		static int push_and_call_impl(state& _s, int nargs, int index, In&&... args)
 		{
-			return push_and_call_impl<A...>(_s, nargs, index + 1, args..., _s.pop<false, T>(index));
+			return push_and_call_impl<A...>(_s, nargs, index, args..., _s.pop<T>(index));
 		}
 
 		template <typename T>
 		struct caller { using type = T; };
 
+		template <typename... A>
+		static constexpr void variadic_arg_check()
+		{
+			if constexpr (detail::is_type_in_variadics<variadic_args, A...>::value())
+				static_assert(detail::is_type_last_in_variadics<variadic_args, A...>::value(), "variadic_args must appear at the end");
+		}
+
 		template <typename R, typename... A>
 		struct caller<R(*)(A...)>
 		{
-			static int push_and_call(state& _s, int nargs) { return push_and_call_impl<A...>(_s, nargs, -nargs); }
+			static int push_and_call(state& _s, int nargs) { variadic_arg_check<A...>(); return push_and_call_impl<A...>(_s, nargs, -nargs); }
 		};
 		
 		template <typename R, typename... A>
 		struct caller<R(*)(state&, A...)>
 		{
-			static int push_and_call(state& _s, int nargs) { return push_and_call_impl<A...>(_s, nargs, -nargs, _s); }
+			static int push_and_call(state& _s, int nargs) { variadic_arg_check<A...>(); return push_and_call_impl<A...>(_s, nargs, -nargs, _s); }
 		};
 
 		static int call(state& _s, int nargs) { return caller<Fn>::push_and_call(_s, nargs); }
@@ -523,21 +617,34 @@ namespace luas
 			vm.get_raw(LUA_REGISTRYINDEX, ref);
 
 			if (vm.call_safe(sizeof...(T), args...))
-				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm.pop<true, T>(); });
+				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm.pop_i<T>(); });
 
 			return out;
 		}
 	};
 
 	template <typename T, typename DT>
-	DT state::_pop(int index) requires(std::is_same_v<DT, lua_fn>)
+	DT state::_pop(int& index) requires(std::is_same_v<DT, lua_fn>)
 	{
-		if (!lua_isfunction(_state, index))
-			return _throw_error<DT>(_state, "Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
+		const auto i = index++;
 
-		push_value(index);
+		if (!lua_isfunction(_state, i))
+			return _throw_error<DT>(_state, "Expected 'function' value, got '{}'", LUA_GET_TYPENAME(i));
+
+		push_value(i);
 
 		return lua_fn(this);
+	}
+
+	template <typename T, typename DT>
+	DT state::_pop(int& index) requires(std::is_same_v<DT, variadic_args>)
+	{
+		print_stack();
+
+		// since variadic arguments are the last, set the index to -1 which is
+		// where the first argument was pushed
+
+		return variadic_args(this, std::exchange(index, -1), -1);
 	}
 
 	class ctx
@@ -563,9 +670,9 @@ namespace luas
 
 				static constexpr int expected_nargs = detail::fn_args_count_v<T>;
 
-				if (const int nargs = vm.get_top(); expected_nargs == nargs)
-					return lua_c_caller<T>::call(vm, nargs);
-				else return state::_throw_error(*vm, "Expected {} arguments, got {}", expected_nargs, nargs);
+				//if (const int nargs = vm.get_top(); expected_nargs == nargs)
+					return lua_c_caller<T>::call(vm, vm.get_top());
+				//else return state::_throw_error(*vm, "Expected {} arguments, got {}", expected_nargs, nargs);
 			};
 
 			const auto fn_obj_loc = vm->new_userdata<T>();
@@ -619,7 +726,7 @@ namespace luas
 			std::tuple<T...> out {};
 
 			if (vm->call_safe_fn(fn, sizeof...(T), args...))
-				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm->pop<true, T>(); });
+				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm->pop_i<T>(); });
 
 			return out;
 		}
