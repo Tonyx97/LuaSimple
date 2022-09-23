@@ -82,16 +82,19 @@ local a = f1(1, test_f);
 	script.add_global("gv3", "test string");
 	script.add_global("_int", new Obj{ 93834 });
 
-	script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::variadic_args va)
+	script.add_function("addEvent", [](const std::string& str, luas::variadic_args va)
 	{
-		printf_s("[addEvent] %s\n", name.c_str());
+		printf_s("[addEvent] %s\n", str.c_str());
+		//printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
 		printf_s("variadic_args size: %i\n", va.size());
-		printf_s("variadic_args value %i: %i\n", 0, va.get<Obj*>(1)->val);
+		printf_s("variadic_args value %i: %i\n", 0, va.get<Obj*>(2)->val);
+
+		va.get<luas::lua_fn>(0).call("tick0", 0, "ye :o");
 
 		//for (int i = 0; i < va.values.size(); ++i)
 		//	printf_s("type: %s\n", va.values[i].type().name());
 
-		s.call_safe_fn("tick0", 0, "ye :o");
+		//s.call_safe_fn("tick0", 0, "ye :o");
 	});
 
 	/*script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::lua_fn& v1, luas::lua_fn& v2, luas::variadic_args va)

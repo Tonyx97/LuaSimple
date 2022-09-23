@@ -476,7 +476,7 @@ namespace luas
 		template <typename T>
 		T get(int i)
 		{
-			return vm.pop_i<T>(first + i + 1, false);
+			return vm.pop_i<T>(first + i, false);
 		}
 
 		int size() const { return last - first; }
@@ -639,8 +639,6 @@ namespace luas
 	template <typename T, typename DT>
 	DT state::_pop(int& index) requires(std::is_same_v<DT, variadic_args>)
 	{
-		print_stack();
-
 		// since variadic arguments are the last, set the index to -1 which is
 		// where the first argument was pushed
 
