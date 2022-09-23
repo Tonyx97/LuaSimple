@@ -255,22 +255,31 @@ namespace luas
 		}
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_bool<DT>) { lua_pushboolean(_state, value); }
+		void _push(const T& value) requires(detail::is_bool<DT>) { push_bool(value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_integer<DT>) { lua_pushinteger(_state, value); }
+		void _push(const T& value) requires(detail::is_integer<DT>) { push_int(value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(std::is_floating_point_v<DT>) { lua_pushnumber(_state, value); }
+		void _push(const T& value) requires(std::is_floating_point_v<DT>) { push_number(value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(std::is_same_v<DT, std::string>) { lua_pushstring(_state, value.c_str()); }
+		void _push(const T& value) requires(detail::is_string<DT> || detail::is_string_array<DT>) { push_string(value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_string_array<DT>) { lua_pushstring(_state, value); }
+		void _push(const T& value) requires(detail::is_userdata<DT> && !std::is_trivial_v<std::remove_pointer_t<DT>>) { push_userdata(value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_userdata<DT> && !std::is_trivial_v<std::remove_pointer_t<DT>>) { lua_pushlightuserdata(_state, value); }
+		void _push(const std::vector<T>& value)
+		{
+			push_table();
+
+			for (int i = 1; const auto& v : value)
+			{
+				push(i++, v);
+				set_table(-3);
+			}
+		}
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
 		DT _pop(int& index) requires(detail::is_bool<DT>) { return to_bool(index++); }
@@ -286,6 +295,37 @@ namespace luas
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
 		DT _pop(int& index) requires(detail::is_userdata<DT>) { return to_userdata<DT>(index++); }
+
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		DT _pop(int& index) requires(detail::is_specialization<DT, std::vector>::value)
+		{
+			if (!lua_istable(_state, index))
+				return _throw_error<DT>(_state, "Expected 'table' value, got '{}'", LUA_GET_TYPENAME(index));
+
+			DT container(static_cast<size_t>(raw_len(index)));
+
+			lua_pushnil(_state);
+
+			while (lua_next(_state, index - 1))
+			{
+				void* key = lua_touserdata(_state, -2);
+
+				printf("0x%x => ", key);
+
+				if (lua_type(_state, -1) == LUA_TLIGHTUSERDATA)
+					printf("0x%x\n", lua_touserdata(_state, -1));
+				else printf("%s\n", lua_tostring(_state, -1));
+
+				lua_pop(_state, 1);
+			}
+
+			//for (auto& v : container)
+			//	v =
+
+			printf_s("vector length: %i\n", container.size());
+
+			return container;
+		}
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
 		DT _pop(int& index) requires(std::is_same_v<DT, lua_fn>);
@@ -351,8 +391,15 @@ namespace luas
 		void make_invalid() { _state = nullptr; }
 		void open_libs() { luaL_openlibs(_state); }
 		void set_global(const char* index) { lua_setglobal(_state, index); }
+		void set_table(int index) { lua_settable(_state, index); }
 		void unref(int v) { luaL_unref(_state, LUA_REGISTRYINDEX, v); }
+		void push_bool(bool v) { lua_pushboolean(_state, v); }
+		void push_int(lua_Integer v) { lua_pushinteger(_state, v); }
+		void push_number(lua_Number v) { lua_pushnumber(_state, v); }
+		void push_string(const std::string& v) { lua_pushstring(_state, v.c_str()); }
+		void push_userdata(void* v) { lua_pushlightuserdata(_state, v); }
 		void push_value(int index) { lua_pushvalue(_state, index); }
+		void push_table() { lua_newtable(_state); }
 
 		void push() {}
 		void pop_n(int n) { lua_pop(_state, n); }
@@ -378,7 +425,7 @@ namespace luas
 		template <typename T, typename DT = std::remove_cvref_t<T>>
 		DT pop_i(int index = -1, bool stack_pop = true)
 		{
-			auto value = _pop<T>(index);
+			auto value = _pop<DT>(index);
 
 			if (stack_pop)
 				pop_n(1);
@@ -386,6 +433,7 @@ namespace luas
 			return value;
 		}
 
+		lua_Unsigned raw_len(int i) const { return lua_rawlen(_state, i); }
 		int get_top() const { return lua_gettop(_state); }
 		int ref() const { return luaL_ref(_state, LUA_REGISTRYINDEX); }
 		int get_raw(int i, int n) const { return lua_rawgeti(_state, i, n); }
@@ -474,10 +522,7 @@ namespace luas
 		~variadic_args() { vm.make_invalid(); }
 
 		template <typename T>
-		T get(int i)
-		{
-			return vm.pop_i<T>(first + i, false);
-		}
+		T get(int i) { return vm.pop_i<T>(first + i, false); }
 
 		int size() const { return last - first; }
 	};

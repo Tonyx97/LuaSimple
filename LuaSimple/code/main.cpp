@@ -1,6 +1,6 @@
 #include "luas.h"
 
-#define COMPILE_LUAWRAPPER 0
+#define COMPILE_LUAWRAPPER 1
 
 #if COMPILE_LUAWRAPPER
 // used for comparisons
@@ -51,17 +51,23 @@ int main()
 #if COMPILE_LUAWRAPPER
 	{
 		LuaContext lua {};
-		lua.writeFunction("f1",
-			[](int a, lua_CFunction f)
-			{
-				return a + 1;
-			});
-		lua.executeCode(R"(
-function test_f()
-	print("woo");
-end
 
-local a = f1(1, test_f);
+		lua.writeVariable("a",
+			std::vector<std::string>
+		{
+			"hello",
+			"goodbye",
+			"how are",
+			"you"
+		}
+		);
+
+		lua.writeFunction("tt", [](std::vector<int> v)
+		{
+			printf_s("%i\n", v.size());
+		});
+
+		lua.executeCode(R"(
 )");
 	}
 #endif
@@ -69,27 +75,31 @@ local a = f1(1, test_f);
 	fatal_error_callback = [](const char*) { return 0; };
 	error_callback = [](const char* err) { printf_s("%s\n", err); return 0; };
 
-	luas::ctx script;
-
 	struct Obj
 	{
 		int val = 0;
 	};
 
+	luas::ctx script;
+
 	script.add_global("gv0", true);
 	script.add_global("gv1", 5.0);
 	script.add_global("gv2", -5.f);
 	script.add_global("gv3", "test string");
-	script.add_global("_int", new Obj{ 93834 });
+	script.add_global("_obj0", new Obj{ 1000 });
+	script.add_global("_obj1", new Obj{ 2000 });
+	script.add_global("_obj2", new Obj{ 3000 });
+	script.add_global("_vec", std::vector<int> { 2, 4, 6, 8, 10 });
 
-	script.add_function("addEvent", [](const std::string& str, luas::variadic_args va)
+	script.add_function("addEvent", [](luas::variadic_args va)
 	{
-		printf_s("[addEvent] %s\n", str.c_str());
-		//printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
+		//printf_s("[addEvent] %s\n", str.c_str());
+		printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
 		printf_s("variadic_args size: %i\n", va.size());
-		printf_s("variadic_args value %i: %i\n", 0, va.get<Obj*>(2)->val);
 
-		va.get<luas::lua_fn>(0).call("tick0", 0, "ye :o");
+		const auto vec = va.get<std::vector<int>>(3);
+
+		va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
 
 		//for (int i = 0; i < va.values.size(); ++i)
 		//	printf_s("type: %s\n", va.values[i].type().name());
@@ -115,23 +125,27 @@ local a = f1(1, test_f);
 function tick0(a)
 	print("wtf insanity: ".. tostring(a));
 end
+
 function tick1()
-	print("gv1: " .. tostring(gv1));
+	--for k, v in pairs(_vec) do
+	--	print("k: " .. tostring(k) .. " | v: " .. tostring(v));
+	--end
 	return 1;
 end
+
 function tick2(a, b, c)
-	print("gv2: " .. tostring(gv2));
-	print("a: " .. tostring(a));
-	print("b: " .. tostring(b));
-	print("c: " .. tostring(c));
 	return a + b + c;
 end
+
 function tick3(a, b)
-	print("gv0: " .. tostring(gv0));
-	print("gv3: " .. tostring(gv3));
-	print("a: " .. tostring(a));
-	print("b: " .. tostring(b));
-	addEvent("onTick", tick1, 1234.47, _int);
+	local _table = {};
+
+	_table[_obj0] = "string from object";
+	_table[_obj1] = _obj0;
+	_table[_obj2] = _obj1;
+
+	addEvent("onTick", tick1, 1234.47, _table);
+
 	--addEvent("onTick", tick1, tick2, true);
 	return a - b;
 end
