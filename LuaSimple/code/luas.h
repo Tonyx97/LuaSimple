@@ -13,8 +13,12 @@
 #include <intrin.h>
 #include <format>
 #include <type_traits>
-#include <vector>
 #include <any>
+#include <vector>
+#include <map>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <lua/lua.hpp>
 
@@ -93,6 +97,12 @@ namespace luas
 
 		template <typename T>
 		concept is_vector = is_specialization<T, std::vector>::value;
+
+		template <typename T>
+		concept is_set = is_specialization<T, std::set>::value || is_specialization<T, std::unordered_set>::value;
+
+		template <typename T>
+		concept is_map = is_specialization<T, std::map>::value || is_specialization<T, std::unordered_map>::value;
 
 		template <typename T>
 		struct fn_return_type { using type = T; };
@@ -276,13 +286,25 @@ namespace luas
 		void _push(const T& value) requires(detail::is_userdata<DT> && !std::is_trivial_v<std::remove_pointer_t<DT>>) { push_userdata(value); }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_vector<DT>)
+		void _push(const T& value) requires(detail::is_vector<DT> || detail::is_set<DT>)
 		{
 			push_table();
 
 			for (int i = 1; const auto& v : value)
 			{
 				push(i++, v);
+				set_table(-3);
+			}
+		}
+
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		void _push(const T& value) requires(detail::is_map<DT>)
+		{
+			push_table();
+
+			for (const auto& [k, v] : value)
+			{
+				push(k, v);
 				set_table(-3);
 			}
 		}
@@ -303,20 +325,20 @@ namespace luas
 		DT _pop(int& i) requires(detail::is_userdata<DT>) { return to_userdata<DT>(i++).first; }
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_specialization<DT, std::vector>::value)
+		DT _pop(int& i) requires(detail::is_vector<DT> || detail::is_set<DT>)
 		{
-			if (!lua_istable(_state, i))
-				return _throw_error<DT>(_state, "Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i));
-
-			DT container(static_cast<size_t>(raw_len(i)));
+			if (!verify_table(i))
+				return {};
 
 			const auto _fail = [this]() -> DT { pop_n(2); return {}; };
+
+			DT out(static_cast<size_t>(raw_len(i)));
 
 			int index = 0;
 
 			push_nil();
 
-			while (lua_next(_state, i - 1))
+			while (next(i - 1))
 			{
 				const auto [key, key_ok] = to_type<int>(-2);
 
@@ -328,12 +350,44 @@ namespace luas
 				if (!value_ok)
 					return _fail();
 
-				container[index++] = value;
+				out[index++] = value;
 
 				pop_n(1);
 			}
 
-			return container;
+			return out;
+		}
+
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		DT _pop(int& i) requires(detail::is_map<DT>)
+		{
+			if (!verify_table(i))
+				return {};
+
+			const auto _fail = [this]() -> DT { pop_n(2); return {}; };
+
+			DT out;
+
+			push_nil();
+
+			while (next(i - 1))
+			{
+				const auto [key, key_ok] = to_type<typename DT::key_type>(-2);
+
+				if (!key_ok)
+					return _fail();
+
+				const auto [value, value_ok] = to_type<typename DT::mapped_type>(-1);
+
+				if (!value_ok)
+					return _fail();
+
+				out[key] = value;
+
+				pop_n(1);
+			}
+
+			return out;
 		}
 
 		template <typename T, typename DT = std::remove_cvref_t<T>>
@@ -448,6 +502,12 @@ namespace luas
 		int ref() const { return luaL_ref(_state, LUA_REGISTRYINDEX); }
 		int get_raw(int i, int n) const { return lua_rawgeti(_state, i, n); }
 		int upvalue_index(int i) const { return lua_upvalueindex(i); }
+		int next(int i) { return lua_next(_state, i); }
+
+		bool verify_table(int i)
+		{
+			return lua_istable(_state, i) ? true : _throw_error<bool>(_state, "Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i));
+		}
 
 		value_ok<bool> to_bool(int i)
 		{
