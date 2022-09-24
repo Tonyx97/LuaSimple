@@ -89,7 +89,7 @@ int main()
 	script.add_global("_obj0", new Obj{ 1000 });
 	script.add_global("_obj1", new Obj{ 2000 });
 	script.add_global("_obj2", new Obj{ 3000 });
-	script.add_global("_vec", std::vector<int> { 2, 4, 6, 8, 10 });
+	script.add_global("_vec", std::vector<Obj*> { new Obj{10}, new Obj{ 20 }, new Obj{ 30 }, new Obj{ 40 } });
 
 	script.add_function("addEvent", [](luas::variadic_args va)
 	{
@@ -97,9 +97,11 @@ int main()
 		printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
 		printf_s("variadic_args size: %i\n", va.size());
 
-		const auto vec = va.get<std::vector<int>>(3);
+		const auto vec = va.get<std::vector<Obj*>>(3);
 
-		va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
+
+
+		//va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
 
 		//for (int i = 0; i < va.values.size(); ++i)
 		//	printf_s("type: %s\n", va.values[i].type().name());
@@ -127,9 +129,9 @@ function tick0(a)
 end
 
 function tick1()
-	--for k, v in pairs(_vec) do
-	--	print("k: " .. tostring(k) .. " | v: " .. tostring(v));
-	--end
+	for k, v in pairs(_vec) do
+		print("k: " .. tostring(k) .. " | v: " .. tostring(v));
+	end
 	return 1;
 end
 
@@ -140,11 +142,13 @@ end
 function tick3(a, b)
 	local _table = {};
 
-	_table[_obj0] = "string from object";
+	_table[_obj0] = "string from object 0";
 	_table[_obj1] = _obj0;
 	_table[_obj2] = _obj1;
 
-	addEvent("onTick", tick1, 1234.47, _table);
+	local _table2 = {};
+
+	addEvent("onTick", tick1, 1234.47, _vec);
 
 	--addEvent("onTick", tick1, tick2, true);
 	return a - b;
@@ -160,7 +164,7 @@ end
 
 		printf_s("\n--------------------------\n");
 
-		std::tuple<lua_Integer> v2 = script.call_safe<lua_Integer>("tick3", 10, 7);
+		std::tuple<float> v2 = script.call_safe<float>("tick3", 10, 7);
 
 		printf_s(FORMATV("{}\n", std::get<0>(v2)).c_str());
 		/*printf_s("should print positive now:\n");
