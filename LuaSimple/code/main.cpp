@@ -106,11 +106,10 @@ int main()
 	script.add_function("addEvent", [](luas::variadic_args va)
 	{
 		//printf_s("[addEvent] %s\n", str.c_str());
-		printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
-		printf_s("variadic_args size: %i\n", va.size());
+		//printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
+		//printf_s("variadic_args size: %i\n", va.size());
 
 		const auto vec = va.get<std::map<std::string, Obj*>>(3);
-
 
 		va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
 
@@ -171,7 +170,7 @@ end
 	{
 		debug_memory();
 
-		printf_s("\n--------------------------\n");
+		//printf_s("\n--------------------------\n");
 
 		std::tuple<float> v2 = script.call_safe<float>("tick3", 10, 7);
 
@@ -181,7 +180,7 @@ end
 		printf_s("should print negative now:\n");
 		printf_s("tick2 res: %i\n", std::get<0>(fn2.call<int>(1, 1, 1)));*/
 
-		Sleep(0);
+		//Sleep(0);
 	}
 
 	return std::cin.get();

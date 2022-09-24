@@ -260,7 +260,7 @@ namespace luas
 		lua_State* _state = nullptr;
 
 		template <typename... A>
-		void throw_error(const std::string& err, const A&... args) { _on_error(_state, FORMATV(err, args...)); }
+		void throw_error(const std::string& err, A&&... args) { _on_error(_state, FORMATV(err, args...)); }
 
 		void push_fn(const std::string& fn)
 		{
@@ -270,23 +270,23 @@ namespace luas
 				_throw_error(_state, "Function {} undefined", fn);
 		}
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_bool<DT>) { push_bool(value); }
+		template <typename T>
+		void _push(const T& value) requires(detail::is_bool<T>) { push_bool(value); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_integer<DT>) { push_int(value); }
+		template <typename T>
+		void _push(const T& value) requires(detail::is_integer<T>) { push_int(value); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(std::is_floating_point_v<DT>) { push_number(value); }
+		template <typename T>
+		void _push(const T& value) requires(std::is_floating_point_v<T>) { push_number(value); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_string<DT> || detail::is_string_array<DT>) { push_string(value); }
+		template <typename T>
+		void _push(const T& value) requires(detail::is_string<T> || detail::is_string_array<T>) { push_string(value); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_userdata<DT> && !std::is_trivial_v<std::remove_pointer_t<DT>>) { push_userdata(value); }
+		template <typename T>
+		void _push(const T& value) requires(detail::is_userdata<T> && !std::is_trivial_v<std::remove_pointer_t<T>>) { push_userdata(value); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_vector<DT> || detail::is_set<DT>)
+		template <typename T>
+		void _push(const T& value) requires(detail::is_vector<T> || detail::is_set<T>)
 		{
 			push_table();
 
@@ -297,8 +297,8 @@ namespace luas
 			}
 		}
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		void _push(const T& value) requires(detail::is_map<DT>)
+		template <typename T>
+		void _push(const T& value) requires(detail::is_map<T>)
 		{
 			push_table();
 
@@ -309,30 +309,30 @@ namespace luas
 			}
 		}
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_bool<DT>) { return to_bool(i++).first; }
+		template <typename T>
+		T _pop(int& i) requires(detail::is_bool<T>) { return to_bool(i++).first; }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_integer<DT>) { return static_cast<DT>(to_int(i++).first); }
+		template <typename T>
+		T _pop(int& i) requires(detail::is_integer<T>) { return static_cast<T>(to_int(i++).first); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(std::is_floating_point_v<DT>) { return static_cast<DT>(to_number(i++).first); }
+		template <typename T>
+		T _pop(int& i) requires(std::is_floating_point_v<T>) { return static_cast<T>(to_number(i++).first); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_string<DT>) { return DT(to_string(i++).first); }
+		template <typename T>
+		T _pop(int& i) requires(detail::is_string<T>) { return T(to_string(i++).first); }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_userdata<DT>) { return to_userdata<DT>(i++).first; }
+		template <typename T>
+		T _pop(int& i) requires(detail::is_userdata<T>) { return to_userdata<T>(i++).first; }
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_vector<DT> || detail::is_set<DT>)
+		template <typename T>
+		T _pop(int& i) requires(detail::is_vector<T> || detail::is_set<T>)
 		{
 			if (!verify_table(i))
 				return {};
 
-			const auto _fail = [this]() -> DT { pop_n(2); return {}; };
+			const auto _fail = [this]() -> T { pop_n(2); return {}; };
 
-			DT out(static_cast<size_t>(raw_len(i)));
+			T out(static_cast<size_t>(raw_len(i)));
 
 			int index = 0;
 
@@ -345,7 +345,7 @@ namespace luas
 				if (!key_ok)
 					return _fail();
 
-				const auto [value, value_ok] = to_type<typename DT::value_type>(-1);
+				const auto [value, value_ok] = to_type<typename T::value_type>(-1);
 
 				if (!value_ok)
 					return _fail();
@@ -358,26 +358,26 @@ namespace luas
 			return out;
 		}
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(detail::is_map<DT>)
+		template <typename T>
+		T _pop(int& i) requires(detail::is_map<T>)
 		{
 			if (!verify_table(i))
 				return {};
 
-			const auto _fail = [this]() -> DT { pop_n(2); return {}; };
+			const auto _fail = [this]() -> T { pop_n(2); return {}; };
 
-			DT out;
+			T out;
 
 			push_nil();
 
 			while (next(i - 1))
 			{
-				const auto [key, key_ok] = to_type<typename DT::key_type>(-2);
+				const auto [key, key_ok] = to_type<typename T::key_type>(-2);
 
 				if (!key_ok)
 					return _fail();
 
-				const auto [value, value_ok] = to_type<typename DT::mapped_type>(-1);
+				const auto [value, value_ok] = to_type<typename T::mapped_type>(-1);
 
 				if (!value_ok)
 					return _fail();
@@ -390,11 +390,11 @@ namespace luas
 			return out;
 		}
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(std::is_same_v<DT, lua_fn>);
+		template <typename T>
+		T _pop(int& i) requires(std::is_same_v<T, lua_fn>);
 
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		DT _pop(int& i) requires(std::is_same_v<DT, variadic_args>);
+		template <typename T>
+		T _pop(int& i) requires(std::is_same_v<T, variadic_args>);
 
 		void get_global(const std::string& name) { lua_getglobal(_state, name.c_str()); }
 
@@ -473,41 +473,38 @@ namespace luas
 				throw_error(lua_tostring(_state, -1));
 		}
 
-		template <typename T, typename... A>
-		void push(const T& value, A&&... args)
+		template <typename T, typename... A, typename NT = std::remove_cvref_t<T>>
+		void push(const T& value, const A&... args)
 		{
 			_push(value);
 			push(args...);
 		}
 
 		template <typename T>
-		T pop(int& i)
-		{
-			return _pop<T>(i);
-		}
+		T pop_read(int i = -1) { return _pop<T>(i); }
 
 		template <typename T>
-		T pop_i(int i = -1, bool stack_pop = true)
+		T pop_track(int& i) { return _pop<T>(i); }
+
+		template <typename T>
+		T pop(int i = -1)
 		{
 			auto value = _pop<T>(i);
 
-			if (stack_pop)
-				pop_n(1);
+			pop_n(1);
 
 			return value;
 		}
 
-		lua_Unsigned raw_len(int i) const { return lua_rawlen(_state, i); }
 		int get_top() const { return lua_gettop(_state); }
 		int ref() const { return luaL_ref(_state, LUA_REGISTRYINDEX); }
 		int get_raw(int i, int n) const { return lua_rawgeti(_state, i, n); }
 		int upvalue_index(int i) const { return lua_upvalueindex(i); }
 		int next(int i) { return lua_next(_state, i); }
 
-		bool verify_table(int i)
-		{
-			return lua_istable(_state, i) ? true : _throw_error<bool>(_state, "Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i));
-		}
+		lua_Unsigned raw_len(int i) const { return lua_rawlen(_state, i); }
+
+		bool verify_table(int i) { return lua_istable(_state, i) ? true : _throw_error<bool>(_state, "Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i)); }
 
 		value_ok<bool> to_bool(int i)
 		{
@@ -571,7 +568,7 @@ namespace luas
 		T* new_userdata() { return static_cast<T*>(lua_newuserdata(_state, sizeof(T))); }
 
 		template <typename... A>
-		bool call_safe_fn(const std::string& fn, int nreturns = 0, A&&... args)
+		bool call_safe_fn(const std::string& fn, int nreturns = 0, const A&... args)
 		{
 			push_fn(fn);
 			push(args...);
@@ -580,7 +577,7 @@ namespace luas
 		}
 
 		template <typename... A>
-		bool call_safe(int nreturns = 0, A&&... args)
+		bool call_safe(int nreturns = 0, const A&... args)
 		{
 			push(args...);
 
@@ -606,7 +603,7 @@ namespace luas
 		~variadic_args() { vm.make_invalid(); }
 
 		template <typename T>
-		T get(int i) { return vm.pop_i<T>(first + i, false); }
+		T get(int i) { return vm.pop_read<T>(first + i); }
 
 		int size() const { return last - first; }
 	};
@@ -655,7 +652,7 @@ namespace luas
 		template <typename T, typename... A, typename... In>
 		static int push_and_call_impl(state& _s, int nargs, int i, In&&... args)
 		{
-			return push_and_call_impl<A...>(_s, nargs, i, args..., _s.pop<T>(i));
+			return push_and_call_impl<A...>(_s, nargs, i, args..., _s.pop_track<T>(i));
 		}
 
 		template <typename T>
@@ -746,27 +743,27 @@ namespace luas
 			vm.get_raw(LUA_REGISTRYINDEX, ref);
 
 			if (vm.call_safe(sizeof...(T), args...))
-				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm.pop_i<T>(); });
+				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm.pop<T>(); });
 
 			return out;
 		}
 	};
 
-	template <typename T, typename DT>
-	DT state::_pop(int& i) requires(std::is_same_v<DT, lua_fn>)
+	template <typename T>
+	T state::_pop(int& i) requires(std::is_same_v<T, lua_fn>)
 	{
 		const auto index = i++;
 
 		if (!lua_isfunction(_state, index))
-			return _throw_error<DT>(_state, "Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
+			return _throw_error<T>(_state, "Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
 
 		push_value(index);
 
 		return lua_fn(this);
 	}
 
-	template <typename T, typename DT>
-	DT state::_pop(int& i) requires(std::is_same_v<DT, variadic_args>)
+	template <typename T>
+	T state::_pop(int& i) requires(std::is_same_v<T, variadic_args>)
 	{
 		// since variadic arguments are the last, set the index to -1 which is
 		// where the first argument was pushed
@@ -797,6 +794,8 @@ namespace luas
 
 				static constexpr int expected_nargs = detail::fn_args_count_v<T>;
 
+				// todo - do check somewhere else
+				// 
 				//if (const int nargs = vm.get_top(); expected_nargs == nargs)
 					return lua_c_caller<T>::call(vm, vm.get_top());
 				//else return state::_throw_error(*vm, "Expected {} arguments, got {}", expected_nargs, nargs);
@@ -853,7 +852,7 @@ namespace luas
 			std::tuple<T...> out {};
 
 			if (vm->call_safe_fn(fn, sizeof...(T), args...))
-				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm->pop_i<T>(); });
+				tuple::for_each_reverse(out, [&]<typename T>(T& item) { item = vm->pop<T>(); });
 
 			return out;
 		}
@@ -865,7 +864,7 @@ namespace luas
 		}
 
 		template <typename T>
-		void add_global(const char* index, T&& value)
+		void add_global(const char* index, const T& value)
 		{
 			vm->push(value);
 			vm->set_global(index);
