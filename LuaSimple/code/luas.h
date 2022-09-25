@@ -357,40 +357,25 @@ namespace luas
 		template <typename T>
 		T _pop(int& i) requires(detail::is_vector<T> || detail::is_set<T>)
 		{
-			if (!verify_table(i))
-				return {};
-
-			const auto _fail = [this]() -> T { pop_n(2); return {}; };
-
-			T out(static_cast<size_t>(raw_len(i)));
-
 			int table_index = 0;
 
-			const bool ok = iterate_table<int, typename T::value_type>([&](auto key, auto value)
-			{
-				out[table_index++] = value;
-			}, i);
+			if (T out(static_cast<size_t>(raw_len(i))); iterate_table<int, typename T::value_type>([&](const auto& key, const auto& value)
+				{
+					out[table_index++] = value;
+				}, i)) return out;
 
-			if (!ok)
-				return {};
-
-			return out;
+			return {};
 		}
 
 		template <typename T>
 		T _pop(int& i) requires(detail::is_map<T>)
 		{
-			T out;
+			if (T out; iterate_table<typename T::key_type, typename T::mapped_type>([&](const auto& key, const auto& value)
+				{
+					out[key] = value;
+				}, i)) return out;
 
-			const bool ok = iterate_table<typename T::key_type, typename T::mapped_type>([&](auto key, auto value)
-			{
-				out[key] = value;
-			}, i);
-
-			if (!ok)
-				return {};
-
-			return out;
+			return {};
 		}
 
 		template <typename T>

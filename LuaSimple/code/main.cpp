@@ -110,7 +110,7 @@ int main()
 		//printf_s("variadic_args size: %i\n", va.size());
 
 		//const auto vec = va.get<std::vector<Obj*>>(3);
-		const auto vec = va.get<std::map<std::string, Obj*>>(3);
+		const auto vec = va.get<std::map<Obj*, Obj*>>(3);
 
 		va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
 
@@ -153,11 +153,11 @@ end
 function tick3(a, b)
 	local _table = {};
 
-	_table[_obj0] = "string from object 0";
+	_table[_obj0] = _obj0;
 	_table[_obj1] = _obj0;
 	_table[_obj2] = _obj1;
 
-	addEvent("onTick", tick1, 1234.47, _map);
+	addEvent("onTick", tick1, 1234.47, _table);
 
 	--addEvent("onTick", tick1, tick2, true);
 	return a - b;
