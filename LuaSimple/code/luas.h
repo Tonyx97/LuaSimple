@@ -593,7 +593,7 @@ namespace luas
 		template <typename T>
 		T get(int i) { return vm.pop_read<T>(first + i); }
 
-		int size() const { return last - first; }
+		int size() const { return (last - first) + 1; }
 	};
 
 	template <typename Fn>

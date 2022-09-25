@@ -125,6 +125,7 @@ int main()
 
 		//const auto vec = va.get<std::vector<Obj*>>(3);
 		//const auto vec = va.get<std::map<Obj*, Obj*>>(3);
+		const auto size = va.size();
 
 		va.get<luas::lua_fn>(1).call();
 
