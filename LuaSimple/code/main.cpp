@@ -103,6 +103,20 @@ int main()
 		return v->val;
 	});
 
+	script.add_function("getTable", []()
+	{
+		std::unordered_map<Obj*, int> out;
+
+		out.insert({ new Obj{ 100 }, 22 });
+		out.insert({ new Obj{ 101 }, 33 });
+		out.insert({ new Obj{ 102 }, 44 });
+		out.insert({ new Obj{ 103 }, 55 });
+		out.insert({ new Obj{ 104 }, 66 });
+		out.insert({ new Obj{ 105 }, 77 }); 
+
+		return out;
+	});
+
 	script.add_function("addEvent", [](luas::variadic_args va)
 	{
 		//printf_s("[addEvent] %s\n", str.c_str());
@@ -110,9 +124,9 @@ int main()
 		//printf_s("variadic_args size: %i\n", va.size());
 
 		//const auto vec = va.get<std::vector<Obj*>>(3);
-		const auto vec = va.get<std::map<Obj*, Obj*>>(3);
+		//const auto vec = va.get<std::map<Obj*, Obj*>>(3);
 
-		va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
+		va.get<luas::lua_fn>(1).call();
 
 		//for (int i = 0; i < va.values.size(); ++i)
 		//	printf_s("type: %s\n", va.values[i].type().name());
@@ -140,8 +154,9 @@ function tick0(a)
 end
 
 function tick1()
-	for k, v in pairs(_map) do
-		print("k: " .. tostring(k) .. " | v: " .. tostring(getValue(v)));
+	local test_table = getTable();
+	for k, v in pairs(test_table) do
+		print("k: " .. tostring(getValue(k)) .. " | v: " .. tostring(v));
 	end
 	return 1;
 end
@@ -153,9 +168,9 @@ end
 function tick3(a, b)
 	local _table = {};
 
-	_table[_obj0] = _obj0;
-	_table[_obj1] = _obj0;
-	_table[_obj2] = _obj1;
+	--_table[_obj0] = _obj0;
+	--_table[_obj1] = _obj0;
+	--_table[_obj2] = _obj1;
 
 	addEvent("onTick", tick1, 1234.47, _table);
 

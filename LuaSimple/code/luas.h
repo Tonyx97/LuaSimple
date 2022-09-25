@@ -179,7 +179,7 @@ namespace luas
 			template <typename T, typename... A>
 			static constexpr bool impl() { return impl<A...>(); }
 
-			static constexpr bool value() { return impl<Args...>(); }
+			static constexpr bool value() { if constexpr (sizeof...(Args) > 0) return impl<Args...>(); else return false; }
 		};
 
 		template <typename V, typename... Args>
@@ -197,7 +197,7 @@ namespace luas
 				return impl<A...>();
 			}
 
-			static constexpr bool value() { return impl<Args...>(); }
+			static constexpr bool value() { if constexpr (sizeof...(Args) > 0) return impl<Args...>(); else return false; }
 		};
 	}
 
@@ -626,7 +626,8 @@ namespace luas
 				}
 				else if constexpr (!std::is_void_v<return_type>)
 				{
-					static_assert(std::is_trivial_v<return_type>, "Return type is non-trivial");
+					if constexpr (!detail::is_vector<return_type> && !detail::is_set<return_type> && !detail::is_map<return_type>)
+						static_assert(std::is_trivial_v<return_type>, "Return type is non-trivial");
 
 					_s.push(ret);
 
