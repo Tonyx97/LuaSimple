@@ -125,7 +125,6 @@ int main()
 
 		//const auto vec = va.get<std::vector<Obj*>>(3);
 		//const auto vec = va.get<std::map<Obj*, Obj*>>(3);
-		const auto size = va.size();
 
 		va.get<luas::lua_fn>(1).call();
 
@@ -156,9 +155,9 @@ end
 
 function tick1()
 	local test_table = getTable();
-	for k, v in pairs(test_table) do
-		print("k: " .. tostring(getValue(k)) .. " | v: " .. tostring(v));
-	end
+	--for k, v in pairs(test_table) do
+	--	print("k: " .. tostring(getValue(k)) .. " | v: " .. tostring(v));
+	--end
 	return 1;
 end
 
@@ -166,17 +165,8 @@ function tick2(a, b, c)
 	return a + b + c;
 end
 
-function tick3(a, b)
-	local _table = {};
-
-	--_table[_obj0] = _obj0;
-	--_table[_obj1] = _obj0;
-	--_table[_obj2] = _obj1;
-
-	addEvent("onTick", tick1, 1234.47, _table);
-
-	--addEvent("onTick", tick1, tick2, true);
-	return a - b;
+function tick3()
+	addEvent("onTick", tick1, 1234.47, _map);
 end
 
 )");
@@ -189,9 +179,12 @@ end
 
 		//printf_s("\n--------------------------\n");
 
-		std::tuple<float> v2 = script.call_safe<float>("tick3", 10, 7);
+		{
+			TimeProfiling tp("tick3");
 
-		printf_s(FORMATV("{}\n", std::get<0>(v2)).c_str());
+			script.call_safe("tick3");
+		}
+
 		/*printf_s("should print positive now:\n");
 		printf_s("tick1 res: %i\n", std::get<0>(fn1.call<int>()));
 		printf_s("should print negative now:\n");
