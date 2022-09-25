@@ -270,6 +270,36 @@ namespace luas
 				_throw_error(_state, "Function {} undefined", fn);
 		}
 
+		template <typename Key, typename Value, typename Fn>
+		bool iterate_table(const Fn& fn, int i)
+		{
+			if (!verify_table(i))
+				return true;
+
+			const auto _fail = [this]() { pop_n(2); return false; };
+
+			push_nil();
+
+			while (next(i - 1))
+			{
+				const auto [key, key_ok] = to_type<Key>(-2);
+
+				if (!key_ok)
+					return _fail();
+
+				const auto [value, value_ok] = to_type<Value>(-1);
+
+				if (!value_ok)
+					return _fail();
+
+				fn(key, value);
+
+				pop_n(1);
+			}
+
+			return true;
+		}
+
 		template <typename T>
 		void _push(const T& value) requires(detail::is_bool<T>) { push_bool(value); }
 
@@ -334,26 +364,15 @@ namespace luas
 
 			T out(static_cast<size_t>(raw_len(i)));
 
-			int index = 0;
+			int table_index = 0;
 
-			push_nil();
-
-			while (next(i - 1))
+			const bool ok = iterate_table<int, typename T::value_type>([&](auto key, auto value)
 			{
-				const auto [key, key_ok] = to_type<int>(-2);
+				out[table_index++] = value;
+			}, i);
 
-				if (!key_ok)
-					return _fail();
-
-				const auto [value, value_ok] = to_type<typename T::value_type>(-1);
-
-				if (!value_ok)
-					return _fail();
-
-				out[index++] = value;
-
-				pop_n(1);
-			}
+			if (!ok)
+				return {};
 
 			return out;
 		}
@@ -361,31 +380,15 @@ namespace luas
 		template <typename T>
 		T _pop(int& i) requires(detail::is_map<T>)
 		{
-			if (!verify_table(i))
-				return {};
-
-			const auto _fail = [this]() -> T { pop_n(2); return {}; };
-
 			T out;
 
-			push_nil();
-
-			while (next(i - 1))
+			const bool ok = iterate_table<typename T::key_type, typename T::mapped_type>([&](auto key, auto value)
 			{
-				const auto [key, key_ok] = to_type<typename T::key_type>(-2);
-
-				if (!key_ok)
-					return _fail();
-
-				const auto [value, value_ok] = to_type<typename T::mapped_type>(-1);
-
-				if (!value_ok)
-					return _fail();
-
 				out[key] = value;
+			}, i);
 
-				pop_n(1);
-			}
+			if (!ok)
+				return {};
 
 			return out;
 		}

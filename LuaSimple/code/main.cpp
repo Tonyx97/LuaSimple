@@ -109,6 +109,7 @@ int main()
 		//printf_s("[addEvent] %s\n", va.get<std::string>(0).c_str());
 		//printf_s("variadic_args size: %i\n", va.size());
 
+		//const auto vec = va.get<std::vector<Obj*>>(3);
 		const auto vec = va.get<std::map<std::string, Obj*>>(3);
 
 		va.get<luas::lua_fn>(1).call("tick0", 0, "ye :o");
