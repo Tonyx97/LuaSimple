@@ -423,6 +423,7 @@ namespace luas
 			});
 		}
 
+		void close() { check_fatal(_state, "Invalid state"); lua_close(_state); }
 		void make_invalid() { _state = nullptr; }
 		void open_libs() { luaL_openlibs(_state); }
 		void set_global(const char* index) { lua_setglobal(_state, index); }
@@ -803,7 +804,7 @@ namespace luas
 
 		~ctx()
 		{
-			lua_close(vm->get());
+			vm->close();
 
 			delete vm;
 		}
