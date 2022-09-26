@@ -1,15 +1,5 @@
 #pragma once
 
-#define USE_DEBUG 1
-
-#if USE_DEBUG
-#include <windows.h>
-#include <dbghelp.h>
-#include <psapi.h>
-
-#include <iostream>
-#endif
-
 #include <intrin.h>
 #include <format>
 #include <type_traits>
@@ -21,12 +11,6 @@
 #include <unordered_set>
 
 #include <lua/lua.hpp>
-
-#ifdef _DEBUG
-#pragma comment(lib, "lua544_static_debug.lib")
-#else
-#pragma comment(lib, "lua544_static.lib")
-#endif
 
 #define FORMAT(t, a) std::vformat(t, std::make_format_args(a...))
 #define FORMATV(t, ...) std::vformat(t, std::make_format_args(__VA_ARGS__))
@@ -252,22 +236,22 @@ namespace luas
 			error_callback(dbg_info.c_str());
 		}
 
-		template <typename T = int, typename... A>
-		static inline T _throw_error(lua_State* vm, const std::string& err, const A&... args) { _on_error(vm, FORMATV(err, args...)); return T{}; }
-
 	private:
 
 		lua_State* _state = nullptr;
 
-		template <typename... A>
-		void throw_error(const std::string& err, A&&... args) { _on_error(_state, FORMATV(err, args...)); }
+		template <typename T = int, typename... A>
+		static T _throw_error(lua_State* vm, const std::string& err, const A&... args) { _on_error(vm, FORMATV(err, args...)); return T{}; }
+
+		template <typename T = int, typename... A>
+		T throw_error(const std::string& err, A&&... args) { _on_error(_state, FORMATV(err, args...)); return T {}; }
 
 		void push_fn(const std::string& fn)
 		{
 			get_global(fn);
 
 			if (!lua_isfunction(_state, -1))
-				_throw_error(_state, "Function {} undefined", fn);
+				throw_error("Function {} undefined", fn);
 		}
 
 		template <typename Key, typename Value, typename Fn>
@@ -391,7 +375,7 @@ namespace luas
 			if (lua_pcall(_state, nargs, nreturns, 0) == 0)
 				return true;
 
-			_throw_error(_state, lua_tostring(_state, -1));
+			throw_error(lua_tostring(_state, -1));
 
 			return false;
 		}
@@ -492,12 +476,12 @@ namespace luas
 
 		lua_Unsigned raw_len(int i) const { return lua_rawlen(_state, i); }
 
-		bool verify_table(int i) { return lua_istable(_state, i) ? true : _throw_error<bool>(_state, "Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i)); }
+		bool verify_table(int i) { return lua_istable(_state, i) ? true : throw_error<bool>("Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i)); }
 
 		value_ok<bool> to_bool(int i)
 		{
 			if (!lua_isboolean(_state, i))
-				return { _throw_error<bool>(_state, "Expected 'bool' value, got '{}'", LUA_GET_TYPENAME(i)), false };
+				return { throw_error<bool>("Expected 'bool' value, got '{}'", LUA_GET_TYPENAME(i)), false };
 
 			return { !!lua_toboolean(_state, i), true };
 		}
@@ -506,7 +490,7 @@ namespace luas
 		value_ok<T> to_int(int i)
 		{
 			if (!lua_isinteger(_state, i))
-				return { _throw_error<T>(_state, "Expected 'integer' value, got '{}'", LUA_GET_TYPENAME(i)), false };
+				return { throw_error<T>("Expected 'integer' value, got '{}'", LUA_GET_TYPENAME(i)), false };
 
 			return { static_cast<T>(lua_tointeger(_state, i)), true };
 		}
@@ -515,7 +499,7 @@ namespace luas
 		value_ok<T> to_number(int i)
 		{
 			if (!lua_isnumber(_state, i))
-				return { _throw_error<T>(_state, "Expected 'number' value, got '{}'", LUA_GET_TYPENAME(i)), false };
+				return { throw_error<T>("Expected 'number' value, got '{}'", LUA_GET_TYPENAME(i)), false };
 
 			return { static_cast<T>(lua_tonumber(_state, i)), true };
 		}
@@ -523,7 +507,7 @@ namespace luas
 		value_ok<std::string> to_string(int i)
 		{
 			if (!lua_isstring(_state, i))
-				return { _throw_error<std::string>(_state, "Expected 'string' value, got '{}'", LUA_GET_TYPENAME(i)), false };
+				return { throw_error<std::string>("Expected 'string' value, got '{}'", LUA_GET_TYPENAME(i)), false };
 
 			return { lua_tostring(_state, i), true };
 		}
@@ -532,7 +516,7 @@ namespace luas
 		value_ok<T> to_userdata(int i)
 		{
 			if (!lua_isuserdata(_state, i))
-				return { _throw_error<std::nullptr_t>(_state, "Expected '{}' value, got '{}'", typeid(T).name(), LUA_GET_TYPENAME(i)), false };
+				return { throw_error<std::nullptr_t>("Expected '{}' value, got '{}'", typeid(T).name(), LUA_GET_TYPENAME(i)), false };
 
 			return { static_cast<T>(lua_touserdata(_state, i)), true };
 		}
@@ -744,7 +728,7 @@ namespace luas
 		const auto index = i++;
 
 		if (!lua_isfunction(_state, index))
-			return _throw_error<T>(_state, "Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
+			return throw_error<T>("Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
 
 		push_value(index);
 

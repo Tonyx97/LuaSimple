@@ -1,4 +1,18 @@
-#include "luas.h"
+#ifdef _DEBUG
+#pragma comment(lib, "lua544_static_debug.lib")
+#else
+#pragma comment(lib, "lua544_static.lib")
+#endif
+
+#define USE_DEBUG 1
+
+#if USE_DEBUG
+#include <windows.h>
+#include <dbghelp.h>
+#include <psapi.h>
+
+#include <iostream>
+#endif
 
 #define COMPILE_LUAWRAPPER 1
 
@@ -7,6 +21,8 @@
 //
 #include "test/luawrapper/LuaContext.hpp"
 #endif
+
+#include "luas.h"
 
 struct TimeProfiling
 {
