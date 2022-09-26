@@ -32,6 +32,9 @@ inline void check_fatal(bool condition, const char* text, A... args)
 		return;
 
 	fatal_error_callback(FORMAT(text, args).c_str());
+
+	// there is no recoverable way out of this...
+	
 	exit(EXIT_FAILURE);
 }
 
