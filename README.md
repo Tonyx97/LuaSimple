@@ -4,4 +4,26 @@
 
 # Documentation
 
-TODO 
+Let's start off with global variables. This is pretty straight forward, you can register common types in the lua context:
+
+```cpp
+luas::ctx script;
+
+script.add_global("gv0", true);
+script.add_global("gv1", 5.0);
+script.add_global("gv2", -5.f);
+script.add_global("gv3", "test string");
+
+script.exec_string(R"(
+print(gv0);
+print(gv1);
+print(gv2);
+print(gv3);
+)");
+
+/* OUTPUT BELOW */
+// true
+// 5.0
+// -5.0
+// test string
+```
