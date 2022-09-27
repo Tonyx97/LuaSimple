@@ -92,8 +92,8 @@ luas::ctx script;
 
 script.add_function("addEvent", [](luas::variadic_args va)
 {
-	std::cout << "There is a total of " << va.size() << " arguments\n";
-	std::cout << va.get<float>(0) << " | " << va.get<std::string>(1) << '\n';
+  std::cout << "There is a total of " << va.size() << " arguments\n";
+  std::cout << va.get<float>(0) << " | " << va.get<std::string>(1) << '\n';
 });
 
 script.exec_string(R"(
@@ -104,4 +104,32 @@ addEvent(10.0, "test");
 // There is a total of 2 arguments
 // 10 | test
 ```
+- - - -
+# Store and Call Lua functions in C++
 
+Some wrappers lack of this feature. In my opinion, it's a very important feature, mostly for game programming where you need to register events etc. You can send Lua functions from Lua to C++, store them and then call them later from your C++ code as well:
+
+```cpp
+script.add_function("addEvent", [](std::string event_name, luas::lua_fn& fn) // lua_fn must be a reference
+{
+  std::cout << "Event name: " << event_name << '\n';
+
+  // if you want to store the function, please use std::move
+  // NOTE: keep in mind, you have to keep the reference so lua_fn isn't destroyed.
+  // there are move operators overloaded to handle this properly so you must use std::move
+  //
+  fn.call(1234);
+});
+
+script.exec_string(R"(
+function someEvent(a)
+  print("someEvent triggered: ".. tostring(a));
+end
+addEvent("printEvent", someEvent);
+)");
+
+/* OUTPUT BELOW */
+// Event name: printEvent
+// someEvent triggered: 1234
+
+```
