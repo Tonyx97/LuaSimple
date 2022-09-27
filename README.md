@@ -31,6 +31,9 @@ print(gv3);
 ```
 - - - -
 # Calling Lua Functions From C++
+
+If you want to call a Lua function from your C++ code it's quite simple:
+
 ```cpp
 luas::ctx script;
 
@@ -39,13 +42,45 @@ function from_cpp(a, b, c)
   print(a);
   print(b);
   print(c);
+	return a + b, "out string"
 end
 )");
 
-script.call_safe("from_cpp", 1.f, 2, ":o");
+std::tuple<float, std::string> result = script.call_safe<float, std::string>("from_cpp", 1.f, 2, ":o");
 
 /* OUTPUT BELOW */
 // 1.0
 // 2
 // :o
+// 3 | out string
 ```
+- - - -
+# Calling C++ Functions From Lua
+
+You can easily handle this:
+
+```cpp
+luas::ctx script;
+
+// you can either return nothing, a single variable (without a tuple) or multiple
+// variables using std::tuple
+script.add_function("addEvent", [](float a, std::string str)
+{
+  std::cout << a << " | " << str << '\n';
+
+  return std::make_tuple(a + 1.f, str + " received");
+});
+
+script.exec_string(R"(
+local a, str = addEvent(10.0, "test");
+print(a);
+print(str);
+)");
+
+/* OUTPUT BELOW */
+// 10 | test
+// 11.0
+// test received
+```
+
+
