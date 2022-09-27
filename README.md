@@ -4,6 +4,8 @@
 
 # Documentation
 ===================
+
+- - - - 
 # Global Variables
 
 Let's start off with global variables. This is pretty straight forward, you can register common types in the lua context:
