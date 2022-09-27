@@ -110,6 +110,8 @@ addEvent(10.0, "test");
 Some wrappers lack of this feature. In my opinion, it's a very important feature, mostly for game programming where you need to register events etc. You can send Lua functions from Lua to C++, store them and then call them later from your C++ code as well:
 
 ```cpp
+luas::ctx script;
+
 script.add_function("addEvent", [](std::string event_name, luas::lua_fn& fn) // lua_fn must be a reference
 {
   std::cout << "Event name: " << event_name << '\n';
@@ -117,6 +119,8 @@ script.add_function("addEvent", [](std::string event_name, luas::lua_fn& fn) // 
   // if you want to store the function, please use std::move
   // NOTE: keep in mind, you have to keep the reference so lua_fn isn't destroyed.
   // there are move operators overloaded to handle this properly so you must use std::move
+  
+  // 'call' in lua_fn also supports single and multiple returns
   //
   fn.call(1234);
 });
@@ -132,4 +136,78 @@ addEvent("printEvent", someEvent);
 // Event name: printEvent
 // someEvent triggered: 1234
 
+```
+- - - -
+# STL Containers (Tables)
+
+STL containers are also support in both directions, from C++ to Lua and viceversa. You can also register global variables as std::vector, std::set, std::map etc. The usage is pretty straight forward:
+
+```cpp
+luas::ctx script;
+
+struct Obj
+{
+  int val = 0;
+};
+
+script.add_function("getValue", [](Obj* v)
+{
+  return v->val;
+});
+
+script.add_function("getTable", []()
+{
+  std::unordered_map<Obj*, int> out;
+
+  // don't mind the memory leaks here hehe
+  
+  out.insert({ new Obj { 100 }, 22 });
+  out.insert({ new Obj { 101 }, 33 });
+  out.insert({ new Obj { 102 }, 44 });
+  out.insert({ new Obj { 103 }, 55 });
+  out.insert({ new Obj { 104 }, 66 });
+  out.insert({ new Obj { 105 }, 77 }); 
+
+  return out;
+});
+
+script.exec_string(R"(
+local test_table = getTable();
+for k, v in pairs(test_table) do
+  print("k: " .. tostring(getValue(k)) .. " | v: " .. tostring(v));
+end
+)");
+
+/* OUTPUT BELOW */
+// k: 100 | v: 22
+// k: 105 | v: 77
+// k: 102 | v: 44
+// k: 104 | v: 66
+// k: 103 | v: 55
+// k: 101 | v: 33
+```
+
+And it works the other way around too:
+
+```cpp
+luas::ctx script;
+
+script.add_function("printMap", [](std::unordered_map<std::string, int> m)
+{
+  for (const auto& [k, v] : m)
+    std::cout << "k: " << k << " | v: " << v << '\n';
+});
+
+script.exec_string(R"(
+local _table = {};
+_table["str 1"] = 2;
+_table["str 2"] = _table["str 1"] + 1;
+_table["str 3"] = _table["str 2"] + 1;
+printMap(_table);
+)");
+
+/* OUTPUT BELOW */
+// k: str 3 | v: 4
+// k: str 2 | v: 3
+// k: str 1 | v: 2
 ```
