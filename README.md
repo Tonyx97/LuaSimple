@@ -30,3 +30,22 @@ print(gv3);
 // test string
 ```
 - - - -
+# Calling Lua Functions From C++
+```cpp
+luas::ctx script;
+
+script.exec_string(R"(
+function from_cpp(a, b, c)
+  print(a);
+  print(b);
+  print(c);
+end
+)");
+
+script.call_safe("from_cpp", 1.f, 2, ":o");
+
+/* OUTPUT BELOW */
+// 1.0
+// 2
+// :o
+```
