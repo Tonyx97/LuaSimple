@@ -82,5 +82,26 @@ print(str);
 // 11.0
 // test received
 ```
+- - - -
+# Variadic Arguments
 
+This wrapper supports variadic arguments, there is only one rule to use them, always declare them at the end of your arguments list:
+
+```cpp
+luas::ctx script;
+
+script.add_function("addEvent", [](luas::variadic_args va)
+{
+	std::cout << "There is a total of " << va.size() << " arguments\n";
+	std::cout << va.get<float>(0) << " | " << va.get<std::string>(1) << '\n';
+});
+
+script.exec_string(R"(
+addEvent(10.0, "test");
+)");
+
+/* OUTPUT BELOW */
+// There is a total of 2 arguments
+// 10 | test
+```
 
