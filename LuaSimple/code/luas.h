@@ -459,8 +459,8 @@ namespace luas
 		template <typename T>
 		T pop_read(int i = -1) { return _pop<T>(i); }
 
-		template <typename T>
-		T pop_track(int& i) { return _pop<T>(i); }
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		DT pop_track(int& i) { return _pop<DT>(i); }
 
 		template <typename T>
 		T pop(int i = -1)

@@ -14,7 +14,7 @@
 #include <iostream>
 #endif
 
-#define COMPILE_LUAWRAPPER 1
+#define COMPILE_LUAWRAPPER 0
 
 #if COMPILE_LUAWRAPPER
 // used for comparisons
@@ -114,7 +114,21 @@ int main()
 		{ "wo4", new Obj{ 40 } },
 	});
 
-	script.add_function("getValue", [](Obj* v)
+	script.add_function("printMap", [](std::unordered_map<std::string, int> m)
+	{
+		for (const auto& [k, v] : m)
+			std::cout << "k: " << k << " | v: " << v << '\n';
+	});
+
+	script.exec_string(R"(
+local _table = {};
+_table["str 1"] = 2;
+_table["str 2"] = _table["str 1"] + 1;
+_table["str 3"] = _table["str 2"] + 1;
+printMap(_table);
+)");
+
+	/*script.add_function("getValue", [](Obj* v)
 	{
 		return v->val;
 	});
@@ -150,7 +164,7 @@ int main()
 		//s.call_safe_fn("tick0", 0, "ye :o");
 	});
 
-	/*script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::lua_fn& v1, luas::lua_fn& v2, luas::variadic_args va)
+	script.add_function("addEvent", [](luas::state& s, const std::string& name, luas::lua_fn& v1, luas::lua_fn& v2, luas::variadic_args va)
 	{
 		printf_s("[addEvent] %s, \n", name.c_str());
 
@@ -161,7 +175,7 @@ int main()
 
 		fn1 = std::move(v1);
 		fn2 = std::move(v2);
-	});*/
+	});
 
 	script.exec_string(R"(
 
@@ -185,7 +199,7 @@ function tick3()
 	addEvent("onTick", tick1, 1234.47, _map);
 end
 
-)");
+)");*/
 
 	BringWindowToTop(GetConsoleWindow());
 
@@ -196,9 +210,9 @@ end
 		//printf_s("\n--------------------------\n");
 
 		{
-			TimeProfiling tp("tick3");
+			//TimeProfiling tp("tick3");
 
-			script.call_safe("tick3");
+			//script.call_safe("tick3");
 		}
 
 		/*printf_s("should print positive now:\n");
