@@ -3,6 +3,7 @@
 ...why? because no other wrapper fits my needs, some have extreme compiler overhead and others are just too basic so I'm making my own one with the lowest template overhead to be able to compile several thousands of templated functions. This is WIP, I will upgrade and add new capabilities as I need them. Feel free to suggest features and fixes. The whole wrapper is located in [luas.h](LuaSimple/code/luas.h) as a single header file so all you need to do is include it in your project to use it.
 
 # Features:
+
 - Register Global Variables (including tables such as std::vector, std::map etc).
 - Calling Lua functions from C++ and viceversa.
 - Multiple Returns.
@@ -10,6 +11,10 @@
 - Store Lua functions and call them from C++ whenever you want.
 - Moving and modifying tables from C++ to Lua and viceversa.
 - Since the wrapper focus on most important things, the code is not as templated as other wrappers so compile times are very acceptable for big projects. For example, in a high-end CPU it would take around 25 seconds to compile 8100 templated functions which is actually fast if you compare it to other wrappers (some of them can't even compile 8100 functions due to compiler overhead...).
+
+# Possible Future Plans:
+
+Metables are an important feature as well, I'd like to implement them in the future when I need them.
 
 # Documentation
 - - - -
