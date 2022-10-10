@@ -150,6 +150,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="code\main.cpp" />
+    <ClCompile Include="code\print_stack.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="code\luas.h" />
@@ -158,6 +159,7 @@
     <ClInclude Include="code\lua\lua.hpp" />
     <ClInclude Include="code\lua\luaconf.h" />
     <ClInclude Include="code\lua\lualib.h" />
+    <ClInclude Include="code\print_stack.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

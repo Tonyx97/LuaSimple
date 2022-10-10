@@ -18,6 +18,9 @@
     <ClCompile Include="code\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="code\print_stack.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="code\lua\lauxlib.h">
@@ -36,6 +39,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="code\luas.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="code\print_stack.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
