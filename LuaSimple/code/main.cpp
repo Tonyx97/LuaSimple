@@ -573,9 +573,9 @@ function test()
 end
 )");
 
-	script.add_function("getVec", [](state& s, vec3* v)
+	script.add_function("getVec", [](state& s, vec3* obj)
 	{
-		printf_s("lol %.2f %.2f %.2f\n", v->x, v->y, v->z);
+		printf_s("lol %.2f %.2f %.2f\n", obj->x, obj->y, obj->z);
 		/*const auto obj = lua_newuserdata(s.get(), sizeof(vec3));
 		*std::bit_cast<vec3**>(obj) = new vec3(10.f, 20.f, 30.f);
 
@@ -593,9 +593,9 @@ end
 		lua_call(s.get(), 0, 0);
 
 		s.push(10.f, 20.f, 30.f);
-		lua_call(s.get(), 3, 1);
+		lua_call(s.get(), 3, 1);*/
 
-		return obj;*/
+		return obj;
 	});
 
 	BringWindowToTop(GetConsoleWindow());
