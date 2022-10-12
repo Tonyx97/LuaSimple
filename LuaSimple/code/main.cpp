@@ -245,10 +245,6 @@ struct class_fn_caller<R(__thiscall*)(Tx*, A...)>
 				R out;
 
 				//printf_s("%s\n", typeid(R*).name());
-				struct test
-				{
-					float x, y, z;
-				};
 
 				reinterpret_cast<R* (__thiscall*)(Tx*, R*, A&&...)>(fn)(this_read, &out);
 
