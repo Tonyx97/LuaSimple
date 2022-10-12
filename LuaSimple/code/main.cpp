@@ -134,12 +134,31 @@ int main()
 			);
 	}
 
+	struct ay
+	{
+		std::vector<int> a;
+	};
+
+	auto _ay = new ay();
+
+	script.add_global("test", _ay);
+
+	//printf_s("0x%x\n", script.get()->get_global_var<std::string>("test").c_str());
+
+	script.add_function("getVec", [](const std::string& name)
+	{
+		//return std::vector<int>({ 1, 2, 3, 4, 5 });
+		return vec3(-1.f, -2.f, -3.f);
+	});
+
 	script.exec_string(R"(
 function test()
 
-	local a = vec3(1, 2, 3);
+	local a3 = getVec("test");
+	print(a3.z);
+
+	--[[local a = vec3(1, 2, 3);
 	local a2 = vec3(10, 20, 30);
-	local a3 = getVec(-1, -2, -3);
 
 	local l = a:len();
 	local b = a:add(a2:add(a3));
@@ -148,16 +167,9 @@ function test()
 
 	print("------ " .. tostring(l) .. " -----");
 	--print(tostring(a.x) .. ", " .. tostring(a.y) .. ", " .. tostring(a.z));
-	print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));
+	print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));]]
 end
 )");
-
-	script.add_function("getVec", [](const luas::variadic_args& va)
-	{
-		printf_s("lol %.2f %.2f %.2f\n", va.get<float>(0), va.get<float>(1), va.get<float>(2));
-
-		return vec3(va.get<float>(0), va.get<float>(1), va.get<float>(2));
-	});
 
 	BringWindowToTop(GetConsoleWindow());
 

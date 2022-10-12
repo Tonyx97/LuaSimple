@@ -13,8 +13,6 @@
 
 #include <lua/lua.hpp>
 
-#include "print_stack.h"
-
 #define FORMAT(t, a) std::vformat(t, std::make_format_args(a...))
 #define FORMATV(t, ...) std::vformat(t, std::make_format_args(__VA_ARGS__))
 
@@ -538,7 +536,7 @@ namespace luas
 
 			int stack = s.get_top();
 
-			s.push(OOP_CREATE_FN_NAME());
+			//s.push(OOP_CREATE_FN_NAME());
 			s.get_raw(1);
 
 			if (s.is_function(-1))
@@ -701,42 +699,15 @@ namespace luas
 			return true;
 		}
 
-		template <typename T>
-		int _push(T&& value) const requires(detail::is_bool<T>) { push_bool(value); return 1; }
+		template <typename T, typename DT = detail::remove_cvref_t<T>>
+		int _push(const T& value) const requires(std::is_same_v<DT, variadic_args>);
 
-		template <typename T>
-		int _push(T&& value) const requires(detail::is_integer<T>) { push_int(value); return 1; }
-
-		template <typename T>
-		int _push(T&& value) const requires(std::is_floating_point_v<T>) { push_number(value); return 1; }
-
-		template <typename T, typename DT = std::remove_cvref_t<T>>
-		int _push(T&& value) const requires(detail::is_string<DT>) { push_string(std::forward<T>(value)); return 1; }
-
-		template <typename T>
-		int _push(T&& value) const requires(detail::is_userdata<T> && !std::is_trivial_v<std::remove_pointer_t<T>>)
-		{
-			// try to push an oop class that was passed as pointer
-			
-			if (const auto c = push(*value))
-				return c;
-
-			// if it's not a registered class then push it as light userdata
-
-			push_userdata(value);
-
-			return 1;
-		}
-
-		template <typename T>
-		int _push(const T& value) const requires(std::is_same_v<T, variadic_args>);
-
-		template <typename T>
-		int _push(T&& value) const requires(detail::is_vector<T> || detail::is_set<T>)
+		template <typename T, typename DT = detail::remove_cvref_t<T>>
+		int _push(T&& value) const requires(detail::is_vector<DT> || detail::is_set<DT>)
 		{
 			push_table();
 
-			for (int i = 1; const auto& v : value)
+			for (int i = 1; const auto & v : value)
 			{
 				push(i++, v);
 				set_table(-3);
@@ -772,33 +743,44 @@ namespace luas
 			return 1;
 		}
 
-		/*
-		* fallthrough function when no other push function is found
-		* that takes T type, used mostly for oop classes
-		*/
+		template <typename T, typename DT = detail::remove_cvref_t<T>>
+		int _push(T&& value) const requires(detail::is_bool<DT>) { push_bool(value); return 1; }
+
+		template <typename T, typename DT = detail::remove_cvref_t<T>>
+		int _push(T&& value) const requires(detail::is_integer<DT>) { push_int(value); return 1; }
+
+		template <typename T, typename DT = detail::remove_cvref_t<T>>
+		int _push(T&& value) const requires(std::is_floating_point_v<DT>) { push_number(value); return 1; }
+
+		template <typename T, typename DT = std::remove_cvref_t<T>>
+		int _push(T&& value) const requires(detail::is_string<DT>) { push_string(std::forward<T>(value)); return 1; }
+
 		template <typename T, typename DT = std::remove_cvref_t<T>>
 		int _push(T&& value) const
 		{
-			if (const auto state_info = get_info())
-				if (const auto class_info = state_info->get_class(TYPEINFO(DT)))
-				{
-					//static_assert(std::is_constructible_v<DT>, "Return type must have default constructor");
+			if constexpr (detail::is_userdata<DT>)
+				return push_userdata(value);
+			else if constexpr (!std::is_abstract_v<DT>)
+				if (const auto state_info = get_info())
+					if (const auto class_info = state_info->get_class(TYPEINFO(DT)))
+					{
+						//static_assert(std::is_constructible_v<DT>, "Return type must have default constructor");
 
-					// create the default object
+						// create the default object
 
-					const auto ptr = new (new_userdata<DT>()) DT();
+						const auto ptr = new (new_userdata<DT>()) DT();
 
-					// move the value to the new memory
-					
-					*ptr = std::move(value);
+						// move the value to the new memory
 
-					// set class' metatable
+						*ptr = std::move(value);
 
-					get_class(class_info->name);
-					set_metatable(-2);
+						// set class' metatable
 
-					return 1;
-				}
+						get_class(class_info->name);
+						set_metatable(-2);
+
+						return 1;
+					}
 
 			return 0;
 		}
@@ -859,7 +841,7 @@ namespace luas
 				}
 		}
 
-		void get_global(const std::string_view& name) const { lua_getglobal(_state, name.data()); }
+		void get_global(const std::string& name) const { lua_getglobal(_state, name.c_str()); }
 
 		bool call_protected(int nargs, int nreturns) const
 		{
@@ -1144,7 +1126,6 @@ namespace luas
 		void push_int(lua_Integer v) const { lua_pushinteger(_state, v); }
 		void push_number(lua_Number v) const { lua_pushnumber(_state, v); }
 		void push_string(const std::string& v) const { lua_pushstring(_state, v.c_str()); }
-		void push_userdata(void* v) const { if (v) lua_pushlightuserdata(_state, v); else lua_pushnil(_state); }
 		void push_table() const { lua_newtable(_state); }
 		void set_metatable(int i) const { lua_setmetatable(_state, i); }
 		void set_raw(int i) const { lua_rawset(_state, i); }
@@ -1156,7 +1137,7 @@ namespace luas
 			push("mt");
 			get_raw(LUA_REGISTRYINDEX);
 
-			check_fatal(is_table(-1), "lua_getclass expected a table");
+			check_fatal(is_table(-1), "get_class expected a table");
 
 			push(class_name);
 			get_raw(-2);
@@ -1181,11 +1162,15 @@ namespace luas
 		}
 
 		template <typename T>
-		T get_global_var(const std::string_view& name) const
+		T get_global_var(const std::string& name) const
 		{
 			get_global(name);
 
-			return pop<T>();
+			T value;
+
+			pop<T>(value);
+
+			return value;
 		}
 
 		template <typename T>
@@ -1199,9 +1184,10 @@ namespace luas
 		int pop_read(T& out, int i = -1) const
 		{
 			_pop(out, i);
-			return i + 1;
+			return i;
 		}
 
+		int push_userdata(void* v) const { if (v) lua_pushlightuserdata(_state, v); else lua_pushnil(_state); return 1; }
 		int push_nil() const { lua_pushnil(_state); return 1; }
 		int push_value(int i) const { lua_pushvalue(_state, i); return 1; }
 		int get_top() const { return lua_gettop(_state); }
@@ -1264,8 +1250,8 @@ namespace luas
 		constexpr value_ok<T> value_from_type(int i) const
 		{
 			if constexpr (detail::is_bool<T>)				return to_bool(i);
-			else if constexpr (detail::is_integer<T>)		return to_int(i);
-			else if constexpr (std::is_floating_point_v<T>) return to_number(i);
+			else if constexpr (detail::is_integer<T>)		return to_int<T>(i);
+			else if constexpr (std::is_floating_point_v<T>) return to_number<T>(i);
 			else if constexpr (detail::is_string<T>)		return to_string(i);
 			else if constexpr (detail::is_userdata<T>)
 			{
@@ -1397,7 +1383,7 @@ namespace luas
 
 			type value;
 			
-			return _impl<A...>(_s, nargs, _s.pop_read(value, i), std::forward<type>(value), std::forward<In>(args)...);
+			return _impl<A...>(_s, nargs, _s.pop_read(value, i), std::forward<In>(args)..., std::forward<type>(value));
 		}
 
 		template <typename T>
@@ -1498,8 +1484,8 @@ namespace luas
 		return call_protected(push(va), nreturns);
 	}
 
-	template <typename T>
-	int state::_push(const T& value) const requires(std::is_same_v<T, variadic_args>)
+	template <typename T, typename DT>
+	int state::_push(const T& value) const requires(std::is_same_v<DT, variadic_args>)
 	{
 		return value.push_all();
 	}
@@ -1509,12 +1495,12 @@ namespace luas
 	{
 		const auto index = i++;
 
-		if (!is_function(index))
-			return throw_error<T>("Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
+		if (is_function(index))
+		{
+			push_value(index);
 
-		push_value(index);
-
-		value = lua_fn(this);
+			value = lua_fn(this);
+		}
 	}
 
 	template <typename T>
