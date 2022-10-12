@@ -24,29 +24,6 @@
 #include "test/luawrapper/LuaContext.hpp"
 #endif
 
-#include "luas.h"
-
-struct TimeProfiling
-{
-	std::chrono::high_resolution_clock::time_point m_start;
-	uint64_t									   cycles = 0;
-	char										   name[128] = { 0 };
-
-	TimeProfiling(const char* name)
-	{
-		strcpy_s(this->name, name);
-		m_start = std::chrono::high_resolution_clock::now();
-		cycles = __rdtsc();
-	}
-
-	~TimeProfiling()
-	{
-		const auto cycles_passed = __rdtsc() - cycles;
-		const auto time_passed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - m_start).count();
-		printf_s(FORMATV("{}: {:.3f} ms | {} mcs | {} cycles\n", name, static_cast<double>(time_passed) / 1000.f, time_passed, cycles_passed).c_str());
-	}
-};
-
 void debug_memory()
 {
 	PROCESS_MEMORY_COUNTERS_EX data;
@@ -61,8 +38,34 @@ void debug_memory()
 	SetConsoleTitleA(buf);
 }
 
-luas::lua_fn fn1;
-luas::lua_fn fn2;
+struct TimeProfiling
+{
+	std::chrono::high_resolution_clock::time_point m_start;
+	uint64_t									   cycles = 0;
+	std::string name = "";
+
+	static inline std::unordered_map<std::string, uint64_t> average_cycles;
+
+	TimeProfiling(const std::string& name) : name(name)
+	{
+		m_start = std::chrono::high_resolution_clock::now();
+		cycles = __rdtsc();
+	}
+
+	~TimeProfiling()
+	{
+		const auto cycles_passed = __rdtsc() - cycles;
+		const auto time_passed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - m_start).count();
+
+		average_cycles[name] = (cycles_passed + average_cycles[name]) / 2ull;
+
+		printf_s(FORMATV("{}: {:.3f} ms | {} mcs | {} cycles (average cycles {})\n", name, static_cast<double>(time_passed) / 1000.f, time_passed, cycles_passed, average_cycles[name]).c_str());
+	}
+};
+
+#include "luas.h"
+
+using namespace luas;
 
 int index_function(lua_State* L)
 {
@@ -85,6 +88,7 @@ int index_function(lua_State* L)
 	if (lua_isfunction(L, -1))
 	{                                     // Found the function, clean up and return
 		lua_remove(L, -2);            // ud, k, function
+
 		return 1;
 	}
 	lua_pop(L, 1);            // ud, k, mt
@@ -220,26 +224,13 @@ void lua_classmetamethod(lua_State* L, const char* method_name, lua_CFunction fn
 	}
 }
 
-void lua_getclass(lua_State* L, const char* class_name)
-{
-	lua_pushstring(L, "mt");
-	lua_rawget(L, LUA_REGISTRYINDEX);	// mt_table
-
-	check_fatal(lua_istable(L, -1), "lua_getclass expected a table");
-
-	lua_pushstring(L, class_name);
-	lua_rawget(L, -2);					// mt_table[class_name]
-
-	lua_remove(L, -2);					// leave mt_table[class_name] at top of the stack
-}
-
 void lua_newclass(lua_State* L)
 {
 	lua_newtable(L);				// obj_table
 
 	lua_pushstring(L, "__class");
 	lua_newtable(L);				// class_table
-	lua_getclass(L, "Generic");		// generic_table = mt_table["Generic"]
+	state(L).get_class("Generic");
 	lua_setmetatable(L, -2);		// class_table.__metatable = generic_table
 	lua_rawset(L, -3);				// REGISTRY["_class"] = obj_table
 
@@ -295,7 +286,34 @@ void lua_classfunction(lua_State* L, const char* fn_name, lua_CFunction fn)
 	}
 }
 
-using namespace luas;
+struct vec3
+{
+	float x = 0.f, y = 0.f, z = 0.f;
+
+	vec3() {}
+	vec3(float x, float y, float z) : x(x), y(y), z(z) {/* printf_s("[vec3] ctor %.2f %.2f %.2f\n", x, y, z); */ }
+	~vec3() { /*printf_s("[vec3] dtor\n"); */ }
+
+	float get_x() { return x; }
+	float get_y() { return y; }
+	float get_z() { return z; }
+
+	void set_x(float v) { x = v; }
+	void set_y(float v) { y = v; }
+	void set_z(float v) { z = v; }
+
+	vec3 add(const vec3& v)
+	{
+		auto res = vec3(x + v.x, y + v.y, z + v.z);
+		return res;
+	}
+	/*void add(const vec3& v)
+	{
+		auto res = vec3(x + v.x, y + v.y, z + v.z);
+	}*/
+
+	float length() const { return std::sqrtf(x * x + y * y + z * z); }
+};
 
 template <typename ObjType>
 struct ctor_caller
@@ -303,7 +321,7 @@ struct ctor_caller
 	template <typename... A, typename... In>
 	static void push_and_call_impl(state& _s, int nargs, [[maybe_unused]] int i, In&&... args) requires (detail::is_empty_args<A...>)
 	{
-		new(lua_newuserdata(_s.get(), sizeof(ObjType))) ObjType(args...);
+		new (lua_newuserdata(_s.get(), sizeof(ObjType))) ObjType(args...);
 	}
 
 	template <typename T, typename... A, typename... In>
@@ -325,64 +343,59 @@ struct ctor_caller
 	static void call(state& _s, int nargs) { caller<Ctor>::push_and_call(_s, nargs); }
 };
 
-struct MemberAccessFns
+template <typename T>
+struct class_fn_caller { using type = T; };
+
+template <typename R, typename Tx, typename... A>
+struct class_fn_caller<R(__thiscall*)(Tx*, A...)>
 {
-	void* write = nullptr,
-		* read = nullptr;
-
-	MemberAccessFns() {}
-
-	template <typename S, typename G>
-	MemberAccessFns(S&& s, G&& g)
+	template <typename... Args, typename... In>
+	static int _impl(state& _s, void* fn, Tx* _this, int nargs, [[maybe_unused]] int i, In... args) requires (detail::is_empty_args<Args>)
 	{
-		write = std::bit_cast<void*>(std::move(s));
-		read = std::bit_cast<void*>(std::move(g));
+		/*const auto fno = std::bit_cast<Fn>(fn);
+		printf_s("%s\n", typeid(decltype(fno)).name());
+		const auto res = fno(args...);
+		_s.push(res);*/
+
+		printf_s("%s\n", typeid(Tx).name());
+
+		//std::invoke<(&vec3::add, _this, args...);
+
+		(std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn))(_this, args...);
+		//auto res = (std::bit_cast<R(__thiscall*)(A...)>(fn))(args...);
+
+		//_s.push(trash);
+
+		return 0;
 	}
+
+	template <typename T, typename... Args, typename... In>
+	static int _impl(state& _s, void* fn, Tx* _this, int nargs, int i, In&&... args)
+	{
+		return _impl<Args...>(_s, fn, _this, nargs, i, args..., _s.pop_track<T>(i));
+	}
+
+	static int call(state& _s, void* fn, Tx* _this, int nargs) {
+
+		alloca(0x100); variadic_arg_check<A...>(); return _impl<A...>(_s, fn, _this, nargs, -nargs); }
 };
-
-std::unordered_map<type_info*, std::unordered_map<std::string, MemberAccessFns>> class_member_access;
-
-struct property_wrapper_base {};
-
-template <typename S, typename G>
-struct property_wrapper : public property_wrapper_base
-{
-	std::string key;
-
-	S s;
-	G g;
-
-	template <typename Sx, typename Gx>
-	property_wrapper(const std::string& key, Sx&& s, Gx&& g) : key(key), s(std::move(s)), g(std::move(g)) {}
-};
-
-template <typename S, typename G>
-inline auto property(const std::string& key, S&& s, G&& g)
-{
-	return property_wrapper<std::decay_t<S>, std::decay_t<G>>(key, std::forward<S>(s), std::forward<G>(g));
-}
 
 template <typename T, typename Ctor, typename... A>
-void register_class(ctx& cs, const std::string& name, A&&... args)
+bool register_class(ctx& cs, const std::string& name, A&&... args)
 {
-	static const auto type_info = const_cast<std::type_info*>(&typeid(T));
+	static const auto type_info = TYPEINFO(T);
 
-	auto create = [](lua_State* _L)
+	auto create = [](lua_State* L)
 	{
-		state s(_L);
+		state s(L);
 
-		ctor_caller<T>::call<Ctor>(s, lua_gettop(_L));
+		if (const auto class_info = s.get_info()->get_class(type_info))
+		{
+			ctor_caller<T>::call<Ctor>(s, s.get_top());
 
-		s.push_userdata(type_info);
-		s.get_raw(LUA_REGISTRYINDEX);
-		
-		const auto class_name = s.to_string(-1).first;
-
-		s.pop_n();
-
-		lua_getclass(_L, class_name.c_str());
-
-		s.set_metatable(-2);
+			s.get_class(class_info->name);
+			s.set_metatable(-2);
+		}
 
 		return 1;
 	};
@@ -391,6 +404,8 @@ void register_class(ctx& cs, const std::string& name, A&&... args)
 	{
 		if (const auto obj = (T*)lua_touserdata(L, -1))
 		{
+			// call destructor before lua frees the instance
+			
 			obj->~T();
 
 			lua_pushboolean(L, true);
@@ -401,13 +416,22 @@ void register_class(ctx& cs, const std::string& name, A&&... args)
 	};
 
 	const auto L = cs.get_lua_state();
-	const auto vm = cs.get();
+	const auto s = cs.get();
 
-	lua_newclass(L);
-	lua_classfunction(L, "create", create);
-	lua_classmetamethod(L, "__gc", destroy);
+	// create state info if it doesn't exist
 
-	auto iterate_fields = []<typename I, typename Ix = std::remove_cvref_t<I>, typename... IA>(const auto& self, lua_State* L, I&& v, IA&&... args)
+	const auto state_info = s->get_info();
+
+	if (state_info->has_class(type_info))
+		return false;
+
+	const auto class_info = state_info->add_class(type_info);
+
+	class_info->name = name;
+
+	// start defining the class
+
+	auto iterate_args = []<typename I, typename Ix = std::remove_cvref_t<I>, typename... IA>(const auto& self, lua_State* L, I&& v, IA&&... args)
 	{
 		// register properties
 		
@@ -416,15 +440,15 @@ void register_class(ctx& cs, const std::string& name, A&&... args)
 			lua_classvariable(L, v.key.c_str(),
 			[](lua_State* L)	// setter
 			{
-				if (const auto ud = lua_touserdata(L, -2))
-				{
-					state s(L);
+				state s(L);
 
+				if (const auto [ud, ok] = s.to_userdata(-2); ud && ok)
+				{
 					const auto field = lua_tostring(L, -1);
 					const auto obj = std::bit_cast<T*>(ud);
 					const auto new_value = s.pop_read<typename detail::first_arg_member_fn<decltype(Ix::s)>::type>(-3);
 
-					if (const auto fn_ptr = class_member_access[type_info][field].write)
+					if (const auto fn_ptr = s.get_info()->get_class(type_info)->index_members[field].write)
 						(*std::bit_cast<detail::keep_member_ptr_fn_v<decltype(Ix::s)>*>(&fn_ptr))(obj, new_value);
 				}
 
@@ -432,17 +456,15 @@ void register_class(ctx& cs, const std::string& name, A&&... args)
 			},
 			[](lua_State* L)	// getter
 			{
-				if (const auto ud = lua_touserdata(L, -2))
+				state s(L);
+
+				if (const auto [ud, ok] = s.to_userdata(-2); ud && ok)
 				{
 					const auto field = lua_tostring(L, -1);
 					const auto obj = std::bit_cast<T*>(ud);
 
-					if (const auto fn_ptr = class_member_access[type_info][field].read)
-					{
-						state(L).push((*std::bit_cast<detail::keep_member_ptr_fn_v<decltype(Ix::g)>*>(&fn_ptr))(obj));
-
-						return 1;
-					}
+					if (const auto fn_ptr = s.get_info()->get_class(type_info)->index_members[field].read)
+						return s.push((*std::bit_cast<detail::keep_member_ptr_fn_v<decltype(Ix::g)>*>(&fn_ptr))(obj));
 				}
 
 				lua_pushnil(L);
@@ -450,61 +472,52 @@ void register_class(ctx& cs, const std::string& name, A&&... args)
 				return 1;
 			});
 
-			class_member_access[type_info].insert({ v.key, MemberAccessFns(v.s, v.g) });
+			state(L).get_info()->get_class(type_info)->index_members.insert({ v.key, member_access_fns(v.s, v.g) });
 		}
+		else if constexpr (std::derived_from<Ix, function_wrapper_base>)
+		{
+			lua_classfunction(L, v.key.c_str(), [](lua_State* L)
+			{
+				state s(L);
 
+				if (const auto fn_ptr = s.get_info()->get_class(type_info)->functions[TYPEINFO(Ix::value)])
+				{
+					printf_s("fuck |||| %s ||||\n", typeid(detail::keep_member_ptr_fn_v<decltype(Ix::value)>).name());
+
+					auto i = -s.get_top();
+
+					const auto _this = s.pop_track<T*>(i);
+
+					//const auto trash = s.pop_track<T*>(i);
+
+					
+					class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::value)>>::call(s, fn_ptr, _this, -i);
+
+					return 1;
+				}
+
+				lua_pushnil(L);
+
+				return 1;
+			});
+
+			state(L).get_info()->get_class(type_info)->functions.insert({ TYPEINFO(Ix::value), std::bit_cast<void*>(std::move(v.value)) });
+		}
+		
 		if constexpr (sizeof...(IA) > 0)
 			self(self, L, std::forward<IA>(args)...);
 	};
 
-	iterate_fields(iterate_fields, L, std::forward<A>(args)...);
+	lua_newclass(L);
+	lua_classfunction(L, "create", create);
+	lua_classmetamethod(L, "__gc", destroy);
 
-	/*lua_classfunction(L, "getX", [](lua_State* L)
-	{
-		const auto v = *std::bit_cast<T**>(lua_touserdata(L, -1));
-		lua_pushnumber(L, v->x);
-		return 1;
-	});*/
-	
+	iterate_args(iterate_args, L, std::forward<A>(args)...);
+
 	lua_registerclass(L, name.c_str());
 
-	vm->push_userdata(type_info);
-	vm->push(name);
-	vm->set_raw(LUA_REGISTRYINDEX);
+	return true;
 }
-
-int allocs = 0,
-	frees = 0;
-
-struct vec3
-{
-	float x, y, z;
-
-	vec3(float x, float y, float z) : x(x), y(y), z(z) { printf_s("[vec3] ctor %.2f %.2f %.2f (%i - %i)\n", x, y, z, allocs, frees); ++allocs; }
-	~vec3() { printf_s("[vec3] dtor (%i - %i)\n", allocs, frees); ++frees; }
-
-	float get_x() { return x; }
-	float get_y() { return y; }
-	float get_z() { return z; }
-
-	void set_x(float v) { x = v; }
-	void set_y(float v) { y = v; }
-	void set_z(float v) { z = v; }
-};
-
-struct vec2
-{
-	float x, y;
-
-	vec2(float x, float y) : x(x), y(y) { printf_s("[vec2] ctor %.2f %.2f\n", x, y); }
-	~vec2() { printf_s("[vec2] dtor\n"); }
-
-	float get_x() { return x; }
-	float get_y() { return y; }
-
-	void set_x(float v) { x = v; }
-	void set_y(float v) { y = v; }
-};
 
 int main()
 {
@@ -540,62 +553,36 @@ int main()
 			"vec3",
 			property("x", &vec3::set_x, &vec3::get_x),
 			property("y", &vec3::set_y, &vec3::get_y),
-			property("z", &vec3::set_z, &vec3::get_z)
+			property("z", &vec3::set_z, &vec3::get_z),
+			function("len", &vec3::length),
+			function("add", &vec3::add)
 			);
-
-		/*register_class<vec2, vec2(float, float)>(
-			script,
-			"vec2",
-			property("x", &vec2::set_x, &vec2::get_x),
-			property("y", &vec2::set_y, &vec2::get_y)
-			);*/
 	}
 
 	script.exec_string(R"(
 function test()
 	local a = vec3(1, 2, 3);
-	getVec(a);
-	--local b = vec2(1, 2);
+	local a2 = vec3(10, 20, 30);
+	--local a = getVec();
 
-	a.y = math.random(0, 10);
+	--a.y = 100.0;
 
-	--b.x = math.random(0, 10);
-	--b.y = math.random(0, 10);
+	--local l = a:len();
+	local b = a:add(a2);
 
-	--print(a.x);
-	--print(a.y);
-	--print(a.z);
-
-	--print(b.x);
-	--print(b.y);
+	--print("------ " .. tostring(l) .. " -----");
+	--print(tostring(a.x) .. ", " .. tostring(a.y) .. ", " .. tostring(a.z));
+	print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));
 
 	collectgarbage();
 end
 )");
 
-	script.add_function("getVec", [](state& s, vec3* obj)
+	script.add_function("getVec", [](state& s)
 	{
-		printf_s("lol %.2f %.2f %.2f\n", obj->x, obj->y, obj->z);
-		/*const auto obj = lua_newuserdata(s.get(), sizeof(vec3));
-		*std::bit_cast<vec3**>(obj) = new vec3(10.f, 20.f, 30.f);
+		//printf_s("lol %.2f %.2f %.2f\n", obj->x, obj->y, obj->z);
 
-		s.push_userdata(const_cast<std::type_info*>(&typeid(vec3)));
-		s.get_raw(LUA_REGISTRYINDEX);
-
-		const auto class_name = s.to_string(-1).first;
-
-		s.pop_n();
-
-		lua_getclass(s.get(), class_name.c_str());
-
-		s.set_metatable(-1);
-		print_stack(s.get());
-		lua_call(s.get(), 0, 0);
-
-		s.push(10.f, 20.f, 30.f);
-		lua_call(s.get(), 3, 1);*/
-
-		return obj;
+		return vec3(10.f, 20.f, 30.f);
 	});
 
 	BringWindowToTop(GetConsoleWindow());
@@ -607,12 +594,10 @@ end
 		//printf_s("\n--------------------------\n");
 
 		{
-			//TimeProfiling tp("tick3");
+			//TimeProfiling tp("time test");
 
-			//script.call_safe("tick3");
+			script.call_safe("test");
 		}
-
-		script.call_safe("test");
 
 		/*printf_s("should print positive now:\n");
 		printf_s("tick1 res: %i\n", std::get<0>(fn1.call<int>()));

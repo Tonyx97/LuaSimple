@@ -35,6 +35,8 @@ extern "C"
 	inline custom_stack_pusher_t custom_stack_pusher = nullptr;
 };
 
+#define TYPEINFO(x) const_cast<std::type_info*>(&typeid(x))
+
 template <typename... A>
 inline void check_fatal(bool condition, const char* text, A... args)
 {
@@ -105,6 +107,9 @@ namespace luas
 
 		template <typename R, typename... A>
 		struct fn_return_type<R(*)(A...)> { using type = R; };
+
+		template <typename R, typename... A>
+		struct fn_return_type<R(__thiscall*)(A...)> { using type = R; };
 
 		template <typename T>
 		using fn_return_type_v = fn_return_type<T>::type;
@@ -264,6 +269,85 @@ namespace luas
 		}
 	}
 
+	struct property_wrapper_base {};
+
+	template <typename S, typename G>
+	struct property_wrapper : public property_wrapper_base
+	{
+		std::string key;
+
+		S s;
+		G g;
+
+		template <typename Sx, typename Gx>
+		property_wrapper(const std::string& key, Sx&& s, Gx&& g) : key(key), s(std::move(s)), g(std::move(g)) {}
+	};
+
+	template <typename S, typename G>
+	inline auto property(const std::string& key, S&& s, G&& g)
+	{
+		return property_wrapper<std::decay_t<S>, std::decay_t<G>>(key, std::forward<S>(s), std::forward<G>(g));
+	}
+
+	struct function_wrapper_base {};
+
+	template <typename T>
+	struct function_wrapper : public function_wrapper_base
+	{
+		std::string key;
+
+		T value;
+
+		template <typename T>
+		function_wrapper(const std::string& key, T&& v) : key(key), value(std::move(v)) {}
+	};
+
+	template <typename T>
+	inline auto function(const std::string& key, T&& v)
+	{
+		return function_wrapper<std::decay_t<T>>(key, std::forward<T>(v));
+	}
+
+	struct member_access_fns
+	{
+		void* write = nullptr,
+			* read = nullptr;
+
+		member_access_fns() {}
+
+		template <typename S, typename G>
+		member_access_fns(S&& s, G&& g)
+		{
+			write = std::bit_cast<void*>(std::move(s));
+			read = std::bit_cast<void*>(std::move(g));
+		}
+	};
+
+	struct state_info
+	{
+		struct oop_class
+		{
+			std::string name;
+
+			std::unordered_map<std::string, member_access_fns> index_members;
+			std::unordered_map<type_info*, void*> functions;
+		};
+
+		std::unordered_map<type_info*, oop_class> classes;
+
+		oop_class* add_class(type_info* type) { return &classes[type]; }
+
+		oop_class* get_class(type_info* type)
+		{
+			auto it = classes.find(type);
+			return it != classes.end() ? &it->second : nullptr;
+		}
+
+		bool has_class(type_info* type) const { return classes.contains(type); }
+	};
+
+	inline std::unordered_map<lua_State*, state_info> states_info;	// todo
+
 	class state
 	{
 	public:
@@ -360,25 +444,37 @@ namespace luas
 		}
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_bool<T>) { push_bool(value); }
+		int _push(const T& value) const requires(detail::is_bool<T>) { push_bool(value); return 1; }
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_integer<T>) { push_int(value); }
+		int _push(const T& value) const requires(detail::is_integer<T>) { push_int(value); return 1; }
 
 		template <typename T>
-		void _push(const T& value) const requires(std::is_floating_point_v<T>) { push_number(value); }
+		int _push(const T& value) const requires(std::is_floating_point_v<T>) { push_number(value); return 1; }
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_string<T> || detail::is_string_array<T>) { push_string(value); }
+		int _push(const T& value) const requires(detail::is_string<T> || detail::is_string_array<T>) { push_string(value); return 1; }
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_userdata<T> && !std::is_trivial_v<std::remove_pointer_t<T>>) { push_userdata(value); }
+		int _push(const T& value) const requires(detail::is_userdata<T> && !std::is_trivial_v<std::remove_pointer_t<T>>)
+		{
+			// try to push an oop class that was passed as pointer
+			
+			if (const auto r = push(*value))
+				return r;
+
+			// if it's not a registered class then push it as light userdata
+
+			push_userdata(value);
+
+			return 1;
+		}
 
 		template <typename T>
-		void _push(const T& value) const requires(std::is_same_v<T, variadic_args>);
+		int _push(const T& value) const requires(std::is_same_v<T, variadic_args>);
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_vector<T> || detail::is_set<T>)
+		int _push(const T& value) const requires(detail::is_vector<T> || detail::is_set<T>)
 		{
 			push_table();
 
@@ -387,19 +483,25 @@ namespace luas
 				push(i++, v);
 				set_table(-3);
 			}
+
+			return 1;
 		}
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_any_vector<T>)
+		int _push(const T& value) const requires(detail::is_any_vector<T>)
 		{
 			check_fatal(custom_stack_pusher, "Custom stack pusher used but not specified");
 
+			int r = 0;
+
 			for (const auto& v : value)
-				custom_stack_pusher(*this, v);
+				r += custom_stack_pusher(*this, v);
+
+			return r;
 		}
 
 		template <typename T>
-		void _push(const T& value) const requires(detail::is_map<T>)
+		int _push(const T& value) const requires(detail::is_map<T>)
 		{
 			push_table();
 
@@ -408,6 +510,40 @@ namespace luas
 				push(k, v);
 				set_table(-3);
 			}
+
+			return 1;
+		}
+
+		/*
+		* fallthrough function when no other push function is found
+		* that takes T type, used mostly for oop classes
+		*/
+		template <typename T>
+		int _push(const T& value) const
+		{
+			if (const auto state_info = get_info())
+				if (const auto class_info = state_info->get_class(TYPEINFO(T)))
+				{
+					static_assert(std::is_constructible_v<T>, "Return type must have default constructor");
+					static_assert(std::is_trivially_move_assignable_v<T>, "Return type must be trivially movable");
+
+					// create the default object
+
+					const auto obj = new (new_userdata<T>()) T {};
+
+					// move the object
+
+					*obj = std::move(value);
+
+					// set class' metatable
+
+					get_class(class_info->name);
+					set_metatable(-2);
+
+					return 1;
+				}
+
+			return 0;
 		}
 
 		template <typename T>
@@ -455,6 +591,20 @@ namespace luas
 		template <typename T>
 		T _pop(int& i) const requires(std::is_same_v<T, variadic_args>);
 
+		/*
+		* fallthrough pop when there is no other pop function
+		* that takes T type
+		*/
+		template <typename T>
+		T _pop(int& i) const
+		{
+			if (const auto state_info = get_info())
+				if (const auto class_info = state_info->get_class(TYPEINFO(T)))
+					return *to_userdata<T*>(i++).first;
+
+			return T();
+		}
+
 		void get_global(const std::string_view& name) const { lua_getglobal(_state, name.data()); }
 
 		bool call_protected(int nargs, int nreturns) const
@@ -489,6 +639,8 @@ namespace luas
 		lua_State* get() const { return _state; }
 		lua_State* operator * () const { return get(); }
 
+		state_info* get_info() const { return &states_info[_state]; }
+
 		operator bool() const { return !!_state; }
 
 		void set_panic()
@@ -503,7 +655,19 @@ namespace luas
 			});
 		}
 
-		void close() { check_fatal(_state, "Invalid state"); lua_close(_state); }
+		void close()
+		{
+			check_fatal(_state, "Invalid state");
+
+			// remove the state entry from the class member access map
+
+			states_info.erase(_state);
+
+			// close lua state
+
+			lua_close(_state);
+		}
+
 		void make_invalid() { _state = nullptr; }
 		void open_libs() const { luaL_openlibs(_state); }
 		void set_global(const char* index) const { lua_setglobal(_state, index); }
@@ -515,14 +679,25 @@ namespace luas
 		void push_string(const std::string& v) const { lua_pushstring(_state, v.c_str()); }
 		void push_userdata(void* v) const { if (v) lua_pushlightuserdata(_state, v); else lua_pushnil(_state); }
 		void push_nil() const { lua_pushnil(_state); }
-		void push_value(int i) const { lua_pushvalue(_state, i); }
 		void push_table() const { lua_newtable(_state); }
 		void set_metatable(int i) const { lua_setmetatable(_state, i); }
 		void set_raw(int i) const { lua_rawset(_state, i); }
 		void set_field(int i, const char* k) { lua_setfield(_state, i, k); }
 		void push_c_fn(lua_CFunction fn) { lua_pushcfunction(_state, fn); }
+		void remove(int i) const { lua_remove(_state, i); }
+		void get_class(const std::string& class_name) const
+		{
+			push<std::string>("mt");
+			get_raw(LUA_REGISTRYINDEX);
 
-		void push() const {}
+			check_fatal(lua_istable(_state, -1), "lua_getclass expected a table");
+
+			push(class_name);
+			get_raw(-2);
+			remove(-2);
+		}
+
+		int push() const { return 0; }
 		void pop_n(int n = 1) const { lua_pop(_state, n); }
 		void exec_string(const std::string_view& code) const
 		{
@@ -531,10 +706,10 @@ namespace luas
 		}
 
 		template <typename T, typename... A>
-		void push(const T& value, A&&... args) const
+		int push(const T& value, A&&... args) const
 		{
-			_push(value);
-			push(args...);
+			const auto r = _push(value);
+			return r + push(args...);
 		}
 
 		template <typename T>
@@ -561,6 +736,7 @@ namespace luas
 			return value;
 		}
 
+		int push_value(int i) const { lua_pushvalue(_state, i); return 1; }
 		int get_top() const { return lua_gettop(_state); }
 		int get_field(int i, const char* k) const { return lua_getfield(_state, i, k); }
 		int ref() const { return luaL_ref(_state, LUA_REGISTRYINDEX); }
@@ -607,7 +783,7 @@ namespace luas
 			return { lua_tostring(_state, i), true };
 		}
 
-		template <typename T>
+		template <typename T = void*>
 		value_ok<T> to_userdata(int i) const
 		{
 			if (!lua_isuserdata(_state, i) && !lua_islightuserdata(_state, i))
@@ -632,7 +808,7 @@ namespace luas
 		void push_c_closure(const T& value) { lua_pushcclosure(_state, value, 1); }
 
 		template <typename T>
-		T* new_userdata() { return static_cast<T*>(lua_newuserdata(_state, sizeof(T))); }
+		T* new_userdata() const { return static_cast<T*>(lua_newuserdata(_state, sizeof(T))); }
 
 		template <typename... A>
 		bool call_safe_fn(const std::string& fn, int nreturns = 0, A&&... args) const
@@ -692,7 +868,7 @@ namespace luas
 
 		int size() const { return (end() - begin()) + 1; }
 
-		void push_all() const
+		int push_all() const
 		{
 			const auto _begin = begin();
 
@@ -700,10 +876,21 @@ namespace luas
 			// order so everytime we push, the same index will be the next
 			// parameter
 
+			int r = 0;
+
 			for (int i = _begin; i <= end(); ++i)
-				vm.push_value(_begin);
+				r += vm.push_value(_begin);
+
+			return r;
 		}
 	};
+
+	template <typename... A>
+	static constexpr void variadic_arg_check()
+	{
+		if constexpr (detail::is_type_in_variadics<variadic_args, A...>::value())
+			static_assert(detail::is_type_last_in_variadics<variadic_args, A...>::value(), "variadic_args must appear at the end");
+	}
 
 	template <typename Fn>
 	struct lua_c_caller
@@ -735,13 +922,6 @@ namespace luas
 				}
 				else if constexpr (!std::is_void_v<return_type>)
 				{
-					if constexpr (
-						!detail::is_vector<return_type> &&
-						!detail::is_set<return_type> &&
-						!detail::is_map<return_type> &&
-						!detail::is_string<return_type>)
-						static_assert(std::is_trivial_v<return_type>, "Return type is not supported");
-
 					_s.push(ret);
 
 					return 1;
@@ -760,19 +940,12 @@ namespace luas
 		template <typename T>
 		struct caller { using type = T; };
 
-		template <typename... A>
-		static constexpr void variadic_arg_check()
-		{
-			if constexpr (detail::is_type_in_variadics<variadic_args, A...>::value())
-				static_assert(detail::is_type_last_in_variadics<variadic_args, A...>::value(), "variadic_args must appear at the end");
-		}
-
 		template <typename R, typename... A>
 		struct caller<R(*)(A...)>
 		{
 			static int push_and_call(state& _s, int nargs) { variadic_arg_check<A...>(); return push_and_call_impl<A...>(_s, nargs, -nargs); }
 		};
-		
+
 		template <typename R, typename... A>
 		struct caller<R(*)(state&, A...)>
 		{
@@ -865,9 +1038,9 @@ namespace luas
 	}
 
 	template <typename T>
-	void state::_push(const T& value) const requires(std::is_same_v<T, variadic_args>)
+	int state::_push(const T& value) const requires(std::is_same_v<T, variadic_args>)
 	{
-		value.push_all();
+		return value.push_all();
 	}
 
 	template <typename T>
