@@ -678,69 +678,63 @@ namespace luas
 		}
 
 		template <typename T>
-		T _pop(int& i) const requires(detail::is_bool<T>) { return to_bool(i++).first; }
+		void _pop(T& value, int& i) const requires(detail::is_bool<T>) { value = to_bool(i++).first; }
 
 		template <typename T>
-		T _pop(int& i) const requires(detail::is_integer<T>) { return static_cast<T>(to_int(i++).first); }
+		void _pop(T& value, int& i) const requires(detail::is_integer<T>) { value = static_cast<T>(to_int(i++).first); }
 
 		template <typename T>
-		T _pop(int& i) const requires(std::is_floating_point_v<T>) { return static_cast<T>(to_number(i++).first); }
+		void _pop(T& value, int& i) const requires(std::is_floating_point_v<T>) { value = static_cast<T>(to_number(i++).first); }
 
 		template <typename T>
-		T _pop(int& i) const requires(detail::is_string<T>) { return T(to_string(i++).first); }
+		void _pop(T& value, int& i) const requires(detail::is_string<T>) { value = T(to_string(i++).first); }
 
 		template <typename T>
-		T _pop(int& i) const requires(detail::is_userdata<T>) { return to_userdata<T>(i++); }
+		void _pop(T& value, int& i) const requires(detail::is_userdata<T>) { value = to_userdata<T>(i++); }
 
 		template <typename T>
-		T _pop(int& i) const requires(detail::is_vector<T> || detail::is_set<T>)
+		void _pop(T& value, int& i) const requires(detail::is_vector<T> || detail::is_set<T>)
 		{
 			int table_index = 0;
 
-			if (T out(static_cast<size_t>(raw_len(i))); iterate_table<int, typename T::value_type>([&](const auto& key, const auto& value)
-				{
-					out[table_index++] = value;
-				}, i)) return out;
+			value.resize(raw_len(i));
 
-			return {};
+			iterate_table<int, typename T::value_type>([&](const auto&, const auto& v)
+			{
+				value[table_index++] = v;
+			}, i);
 		}
 
 		template <typename T>
-		T _pop(int& i) const requires(detail::is_map<T>)
+		void _pop(T& value, int& i) const requires(detail::is_map<T>)
 		{
-			if (T out; iterate_table<typename T::key_type, typename T::mapped_type>([&](const auto& key, const auto& value)
-				{
-					out[key] = value;
-				}, i)) return out;
-
-			return {};
+			iterate_table<typename T::key_type, typename T::mapped_type>([&](const auto& k, const auto& v)
+			{
+				value[k] = v;
+			}, i);
 		}
 
 		template <typename T>
-		T _pop(int& i) const requires(std::is_same_v<T, lua_fn>);
+		void _pop(T& value, int& i) const requires(std::is_same_v<T, lua_fn>);
 
 		template <typename T>
-		T _pop(int& i) const requires(std::is_same_v<T, variadic_args>);
+		void _pop(T& value, int& i) const requires(std::is_same_v<T, variadic_args>);
 
 		/*
 		* fallthrough pop when there is no other pop function
 		* that takes T type
 		*/
 		template <typename T>
-		T _pop(int& i) const
+		void _pop(T& value, int& i) const
 		{
 			if (const auto state_info = get_info())
 				if (const auto class_info = state_info->get_class(TYPEINFO(T)))
 				{
-					const auto r = **to_userdata<T**>(i++);
+					value = **to_userdata<T**>(i++);
 
 					get_class(class_info->name);
 					set_metatable(-2);
-
-					return r;
 				}
-
-			return T();
 		}
 
 		void get_global(const std::string_view& name) const { lua_getglobal(_state, name.data()); }
@@ -886,7 +880,6 @@ namespace luas
 		template <typename T, typename... A>
 		int push(T&& value, A&&... args) const
 		{
-			//printf_s("%s    -    %s   %i\n", typeid(decltype(std::forward<T>(value))).name(), typeid(std::string).name(), std::is_same_v<decltype(std::forward<T>(value)), std::string>);
 			auto r = _push(std::forward<T>(value));
 			return r + push(std::forward<A>(args)...);
 		}
@@ -900,12 +893,9 @@ namespace luas
 		}
 
 		template <typename T>
-		T pop_read(int i = -1) const { return _pop<T>(i); }
-
-		template <typename T>
 		void pop(T& out, int i = -1) const
 		{
-			out = _pop<T>(i);
+			_pop(out, i);
 			pop_n();
 		}
 
@@ -1035,8 +1025,8 @@ namespace luas
 		int begin() const { return first + stack_offset; }
 		int end() const { return last + stack_offset; }
 
-		template <typename T>
-		T get(int i) const { return vm.pop_read<T>(begin() + i); }
+		//template <typename T>
+		//T get(int i) const { return vm.pop_read<T>(begin() + i); }
 
 		int get_type(int i) const { return lua_type(*vm, begin() + i); }
 
@@ -1216,7 +1206,7 @@ namespace luas
 	}*/
 
 	template <typename T>
-	T state::_pop(int& i) const requires(std::is_same_v<T, lua_fn>)
+	void state::_pop(T& value, int& i) const requires(std::is_same_v<T, lua_fn>)
 	{
 		const auto index = i++;
 
@@ -1225,16 +1215,16 @@ namespace luas
 
 		push_value(index);
 
-		return lua_fn(this);
+		value = lua_fn(this);
 	}
 
 	template <typename T>
-	T state::_pop(int& i) const requires(std::is_same_v<T, variadic_args>)
+	void state::_pop(T& value, int& i) const requires(std::is_same_v<T, variadic_args>)
 	{
 		// since variadic arguments are the last, set the index to -1 which is
 		// where the first argument was pushed
 
-		return variadic_args(this, std::exchange(i, -1), -1);
+		value = variadic_args(this, std::exchange(i, -1), -1);
 	}
 
 	class ctx

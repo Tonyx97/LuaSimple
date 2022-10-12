@@ -162,20 +162,12 @@ struct vec3
 
 	std::vector<uint64_t> test;
 
-	vec3() { for (int i = 0; i < 1000; ++i) test.push_back(i); }
-	vec3(float x, float y, float z) : x(x), y(y), z(z) { printf_s("[ALLOC] %i %i\n", ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
+	vec3()												{ printf_s("[ALLOC] %i %i\n", ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
+	vec3(float x, float y, float z) : x(x), y(y), z(z)	{ printf_s("[ALLOC] %i %i\n", ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
 	~vec3()
 	{
 		printf_s("[FREE] %i %i (size: %i)\n", allocs, ++frees, test.size());
-
-		test.clear();
-		test.shrink_to_fit();
 	}
-
-	/*vec3(const vec3& v)
-	{
-		test = std::move(v.test);
-	}*/
 
 	float get_x() { return x; }
 	float get_y() { return y; }
@@ -185,10 +177,14 @@ struct vec3
 	void set_y(float v) { y = v; }
 	void set_z(float v) { z = v; }
 
-	vec3 add(const vec3& v)
+	/*vec3 add(const vec3& v)
 	{
-		auto res = vec3(x + v.x, y + v.y, z + v.z);
-		return res;
+		return { x + v.x, y + v.y, z + v.z };
+	}*/
+
+	vec3 add()
+	{
+		return { x + 1.f, y + 2.f, z + 3.f };
 	}
 
 	float length() const { return std::sqrtf(x * x + y * y + z * z); }
@@ -248,10 +244,16 @@ struct class_fn_caller<R(__thiscall*)(Tx*, A...)>
 			{
 				R out;
 
-				std::bit_cast<R*(__thiscall*)(Tx*, R*, A&&...)>(fn)(this_read, &out, std::forward<A>(args)...);
+				//printf_s("%s\n", typeid(R*).name());
+				struct test
+				{
+					float x, y, z;
+				};
 
-				_s.push(out);
-				return 1;
+				reinterpret_cast<R* (__thiscall*)(Tx*, R*, A&&...)>(fn)(this_read, &out);
+
+				//_s.push(out);
+				return 0;
 
 				//return _s.push(std::bit_cast<R*(__thiscall*)(Tx*, R*, A...)>(fn)(this_read, &out, args...));
 			}
@@ -305,7 +307,9 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 	{
 		state s(L);
 
-		if (auto obj = s.pop_read<T**>(-1))
+		T** obj; s.pop(obj, -1);
+
+		if (obj && *obj)
 		{
 			delete *obj;
 
@@ -343,8 +347,8 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 			{
 				state s(L);
 
-				if (const auto field_info = s.get_info()->get_class(type_info)->get_field_info(s.pop_read<std::string>(-3)))
-					return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::s)>>::call(s, field_info->write, -2);
+				//if (const auto field_info = s.get_info()->get_class(type_info)->get_field_info(s.pop_read<std::string>(-3)))
+				//	return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::s)>>::call(s, field_info->write, -2);
 
 				return s.push_nil();
 			},
@@ -352,8 +356,8 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 			{
 				state s(L);
 
-				if (const auto field_info = s.get_info()->get_class(type_info)->get_field_info(s.pop_read<std::string>(-1)))
-					return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::g)>>::call(s, field_info->read, s.get_top());
+				//if (const auto field_info = s.get_info()->get_class(type_info)->get_field_info(s.pop_read<std::string>(-1)))
+				//	return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::g)>>::call(s, field_info->read, s.get_top());
 
 				return s.push_nil();
 			});
