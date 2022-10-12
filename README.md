@@ -126,16 +126,11 @@ There is basic support for classes implementation:
 ```cpp
 struct vec3
 {
-	static inline int allocs = 0,
-					  frees = 0;
-
 	float x = 0.f, y = 0.f, z = 0.f;
 
-	//std::vector<uint64_t> test;
-
-	vec3()												{ /*printf_s("[ALLOC 1 %p] %i %i\n", this, ++allocs, frees);*/ /*for (int i = 0; i < 1000; ++i) test.push_back(i);*/ }
-	vec3(float x, float y, float z) : x(x), y(y), z(z)	{ /*printf_s("[ALLOC 2 %p] %i %i\n", this, ++allocs, frees);*/ /*for (int i = 0; i < 1000; ++i) test.push_back(i);*/ }
-	~vec3()												{ /*printf_s("[FREE %p] %i %i (size: %i)\n", this, allocs, ++frees, test.size());*/ }
+	vec3() {}
+	vec3(float x, float y, float z) : x(x), y(y), z(z) {}
+	~vec3() {}
 
 	float get_x() { return x; }
 	float get_y() { return y; }
