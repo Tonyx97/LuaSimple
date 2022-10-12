@@ -162,11 +162,11 @@ struct vec3
 
 	std::vector<uint64_t> test;
 
-	vec3()												{ printf_s("[ALLOC] %i %i\n", ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
-	vec3(float x, float y, float z) : x(x), y(y), z(z)	{ printf_s("[ALLOC] %i %i\n", ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
+	vec3()												{ printf_s("[ALLOC 1 %p] %i %i\n", this, ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
+	vec3(float x, float y, float z) : x(x), y(y), z(z)	{ printf_s("[ALLOC 2 %p] %i %i\n", this, ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
 	~vec3()
 	{
-		printf_s("[FREE] %i %i (size: %i)\n", allocs, ++frees, test.size());
+		printf_s("[FREE %p] %i %i (size: %i)\n", this, allocs, ++frees, test.size());
 	}
 
 	float get_x() { return x; }
@@ -184,7 +184,7 @@ struct vec3
 
 	vec3 add()
 	{
-		return { x + 1.f, y + 2.f, z + 3.f };
+		return vec3 { x + 1.f, y + 2.f, z + 3.f };
 	}
 
 	float length() const { return std::sqrtf(x * x + y * y + z * z); }
@@ -242,16 +242,19 @@ struct class_fn_caller<R(__thiscall*)(Tx*, A...)>
 				return _s.push(std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(this_read, args...));
 			else
 			{
-				R out;
+				using ret_type = std::aligned_storage_t<sizeof(R), alignof(R)>;
 
-				//printf_s("%s\n", typeid(R*).name());
+				ret_type out;
 
-				reinterpret_cast<R* (__thiscall*)(Tx*, R*, A&&...)>(fn)(this_read, &out);
+				reinterpret_cast<ret_type*(__thiscall*)(Tx*, ret_type*, A&&...)>(fn)(this_read, &out);
 
-				//_s.push(out);
+				auto ptr = std::bit_cast<R*>(&out);
+
+				ptr->~R();
+
 				return 0;
 
-				//return _s.push(std::bit_cast<R*(__thiscall*)(Tx*, R*, A...)>(fn)(this_read, &out, args...));
+				//return _s.push(std::bit_cast<R*(__thiscall*)(Tx*, R*, A...)>(fn)(this_read, out, args...));
 			}
 		}
 
