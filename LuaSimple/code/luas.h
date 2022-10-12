@@ -13,6 +13,8 @@
 
 #include <lua/lua.hpp>
 
+#include "print_stack.h"
+
 #define FORMAT(t, a) std::vformat(t, std::make_format_args(a...))
 #define FORMATV(t, ...) std::vformat(t, std::make_format_args(__VA_ARGS__))
 
@@ -254,6 +256,9 @@ namespace luas
 
 		template <typename T>
 		using remove_cvref_t = remove_cvref<T>::type;
+
+		template <typename T>
+		concept does_ret_type_fit_in_eax = std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_pointer_v<T>;
 	}
 
 	namespace tuple
@@ -418,6 +423,93 @@ namespace luas
 
 	private:
 
+		template <typename ObjType>
+		struct ctor_caller
+		{
+			template <typename... A, typename... In>
+			static void _impl(state& _s, In&&... args) requires (detail::is_empty_args<A...>)
+			{
+				new (_s.new_userdata<ObjType>()) ObjType(args...);
+			}
+
+			template <typename T, typename... A, typename... In>
+			static void _impl(state& _s, In&&... args)
+			{
+				using type = detail::remove_cvref_t<T>;
+
+				type value; _s.pop(value);
+
+				_impl<A...>(_s, std::forward<type>(value), std::forward<In>(args)...);
+			}
+
+			template <typename T>
+			struct caller { using type = T; };
+
+			template <typename R, typename... A>
+			struct caller<R(A...)>
+			{
+				static void _do(state& _s) { _impl<A...>(_s); }
+			};
+
+			template <typename Ctor>
+			static void call(state& _s) { caller<Ctor>::_do(_s); }
+		};
+
+		template <typename T>
+		struct class_fn_caller { using type = T; };
+
+		template <typename R, typename Tx, typename... A>
+		struct class_fn_caller<R(__thiscall*)(Tx*, A...)>
+		{
+			template <typename... Args, typename... In>
+			static int _impl(state& _s, void* fn, Tx* _this, In&&... args) requires (detail::is_empty_args<Args>)
+			{
+				if constexpr (std::is_void_v<R>)
+					std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(_this, args...);
+				else if constexpr (detail::does_ret_type_fit_in_eax<R>)
+					return _s.push(std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(_this, args...));
+				else
+				{
+					using _R = std::aligned_storage_t<sizeof(R), alignof(R)>;
+
+					_R out;
+
+					const auto ret = std::bit_cast<_R* (__thiscall*)(Tx*, _R*, A&&...)>(fn)(_this, &out, std::forward<A>(args)...);
+
+					// the memory for the return value is not allocated so just call the dtor
+
+					const auto casted_ret = std::bit_cast<R*>(ret);
+
+					int c = _s.push(*casted_ret);
+
+					casted_ret->~R();
+
+					return c;
+				}
+
+				return 0;
+			}
+
+			template <typename T, typename... Args, typename... In>
+			static int _impl(state& _s, void* fn, Tx* _this, In&&... args)
+			{
+				using type = detail::remove_cvref_t<T>;
+
+				type value; _s.pop(value);
+
+				return _impl<Args...>(_s, fn, _this, std::forward<In>(args)..., std::forward<type>(value));
+			}
+
+			static int call(state& _s, void* fn)
+			{
+				variadic_arg_check<A...>();
+
+				Tx* _this; _s.pop(_this);
+
+				return _impl<A...>(_s, fn, _this);
+			}
+		};
+
 		static constexpr auto OOP_CREATE_FN_NAME() { return "create"; }
 
 		template <typename T = int, typename... A>
@@ -425,25 +517,27 @@ namespace luas
 
 		static int oop_obj_create(lua_State* L)	// todo - clean
 		{
-			if (!lua_istable(L, 1))
+			state s(L);
+
+			if (!s.verify_table(1))
 				return 0;
 
-			int stack = lua_gettop(L);
+			int stack = s.get_top();
 
-			lua_pushstring(L, OOP_CREATE_FN_NAME());
-			lua_rawget(L, 1);
+			s.push(OOP_CREATE_FN_NAME());
+			s.get_raw(1);
 
-			if (lua_isfunction(L, -1))
+			if (s.verify_function(-1))
 			{
 				for (int i = 2; i <= stack; ++i)
-					lua_pushvalue(L, i);
+					s.push_value(i);
 
-				lua_call(L, stack - 1, LUA_MULTRET);
+				s.call_protected(stack - 1, LUA_MULTRET);
 
-				return lua_gettop(L) - stack;
+				return s.get_top() - stack;
 			}
 
-			lua_pop(L, 1);
+			s.pop_n();
 
 			return 1;
 		}
@@ -522,9 +616,9 @@ namespace luas
 
 			if (lua_isfunction(L, -1))
 			{                                       // Found the property
-				lua_pushvalue(L, 2);            // push field
-				lua_pushvalue(L, 1);            // ud, k, v, mt, function, ud
 				lua_pushvalue(L, 3);            // ud, k, v, mt, function, ud, v
+				lua_pushvalue(L, 1);            // ud, k, v, mt, function, ud
+				lua_pushvalue(L, 2);            // push field
 
 				lua_call(L, 3, 0);            // ud, k, v, mt
 				lua_pop(L, 1);            // ud, k, v
@@ -535,6 +629,20 @@ namespace luas
 			lua_pop(L, 1);            // ud, k, v, mt
 
 			return 0;
+		}
+		
+		static int read_only(lua_State* L)
+		{
+			luaL_error(L, "Property %s is read-only", lua_tostring(L, lua_upvalueindex(1)));
+			lua_pushnil(L);
+			return 1;
+		}
+
+		static int write_only(lua_State* L)
+		{
+			luaL_error(L, "Property %s is write-only", lua_tostring(L, lua_upvalueindex(1)));
+			lua_pushnil(L);
+			return 1;
 		}
 
 		template <typename T = int, typename... A>
@@ -560,17 +668,17 @@ namespace luas
 
 			while (next(i - 1))
 			{
-				const auto [key, key_ok] = to_type<Key>(-2);
+				const auto [k, k_ok] = value_from_type<Key>(-2);
 
-				if (!key_ok)
+				if (!k_ok)
 					return _fail();
 
-				const auto [value, value_ok] = to_type<Value>(-1);
+				const auto [v, v_ok] = value_from_type<Value>(-1);
 
-				if (!value_ok)
+				if (!v_ok)
 					return _fail();
 
-				fn(key, value);
+				fn(k, v);
 
 				pop_n();
 			}
@@ -595,8 +703,8 @@ namespace luas
 		{
 			// try to push an oop class that was passed as pointer
 			
-			if (const auto r = push(*value))
-				return r;
+			if (const auto c = push(*value))
+				return c;
 
 			// if it's not a registered class then push it as light userdata
 
@@ -605,8 +713,8 @@ namespace luas
 			return 1;
 		}
 
-		/*template <typename T>
-		int _push(const T& value) const requires(std::is_same_v<T, variadic_args>);*/
+		template <typename T>
+		int _push(const T& value) const requires(std::is_same_v<T, variadic_args>);
 
 		template <typename T>
 		int _push(T&& value) const requires(detail::is_vector<T> || detail::is_set<T>)
@@ -622,18 +730,18 @@ namespace luas
 			return 1;
 		}
 
-		/*template <typename T>
+		template <typename T>
 		int _push(T&& value) const requires(detail::is_any_vector<T>)
 		{
 			check_fatal(custom_stack_pusher, "Custom stack pusher used but not specified");
 
-			int r = 0;
+			int c = 0;
 
 			for (const auto& v : value)
-				r += custom_stack_pusher(*this, v);
+				c += custom_stack_pusher(*this, v);
 
-			return r;
-		}*/
+			return c;
+		}
 
 		template <typename T>
 		int _push(T&& value) const requires(detail::is_map<T>)
@@ -659,12 +767,15 @@ namespace luas
 			if (const auto state_info = get_info())
 				if (const auto class_info = state_info->get_class(TYPEINFO(DT)))
 				{
-					//static_assert(std::is_constructible_v<T>, "Return type must have default constructor");
-					//static_assert(std::is_trivially_move_assignable_v<T>, "Return type must be trivially movable"); // todo
+					//static_assert(std::is_constructible_v<DT>, "Return type must have default constructor");
 
 					// create the default object
 
-					*(*new_userdata<DT*>() = new DT()) = value;
+					const auto ptr = new (new_userdata<DT>()) DT();
+
+					// move the value to the new memory
+					
+					*ptr = std::move(value);
 
 					// set class' metatable
 
@@ -700,18 +811,14 @@ namespace luas
 			value.resize(raw_len(i));
 
 			iterate_table<int, typename T::value_type>([&](const auto&, const auto& v)
-			{
-				value[table_index++] = v;
-			}, i);
+			{ value[table_index++] = v; }, i);
 		}
 
 		template <typename T>
 		void _pop(T& value, int& i) const requires(detail::is_map<T>)
 		{
 			iterate_table<typename T::key_type, typename T::mapped_type>([&](const auto& k, const auto& v)
-			{
-				value[k] = v;
-			}, i);
+			{ value[k] = v; }, i);
 		}
 
 		template <typename T>
@@ -730,7 +837,7 @@ namespace luas
 			if (const auto state_info = get_info())
 				if (const auto class_info = state_info->get_class(TYPEINFO(T)))
 				{
-					value = **to_userdata<T**>(i++);
+					value = *to_userdata<T*>(i++);
 
 					get_class(class_info->name);
 					set_metatable(-2);
@@ -760,16 +867,6 @@ namespace luas
 			set_field(-2, "Generic");
 			pop_n();
 		}
-
-	public:
-
-		state() {}
-		state(lua_State* _state) : _state(_state) {}									// mostly for views
-		state(lua_State* _state, bool oop) : _state(_state) { if (oop) init_oop(); }	// used by luas::ctx
-		~state() { make_invalid(); }
-
-		// todo - move to private space
-
 		void begin_class()
 		{
 			push_table();
@@ -781,7 +878,7 @@ namespace luas
 			push("__newindex");	push_value(-2); push_c_closure(newindex_function); set_raw(-3);
 		}
 
-		void add_class_metamethod(const char* method_name, lua_CFunction fn)
+		void add_class_metamethod(const std::string& method_name, lua_CFunction fn)
 		{
 			if (!fn)
 				return;
@@ -792,7 +889,65 @@ namespace luas
 			set_raw(-3);
 		}
 
-		void end_class(const char* class_name)
+		void add_class_function(const std::string& fn_name, lua_CFunction fn)
+		{
+			if (fn)
+			{
+				push("__class");
+				get_raw(-2);
+
+				push(fn_name);
+				push(fn_name);
+				push_c_closure(fn);
+				set_raw(-3);
+				pop_n();
+			}
+		}
+
+		void add_class_variable(const std::string& variable_name, lua_CFunction set, lua_CFunction get)
+		{
+			push("__set");
+			get_raw(-2);
+
+			if (!set)
+			{
+				push(variable_name);
+				push(variable_name);
+				push_c_closure(read_only);
+				set_raw(-3);
+			}
+			else
+			{
+				push(variable_name);
+				push(variable_name);
+				push_c_closure(set);
+				set_raw(-3);
+			}
+
+			pop_n();
+
+			push("__get");
+			get_raw(-2);
+
+			if (!get)
+			{
+				push(variable_name);
+				push(variable_name);
+				push_c_closure(write_only);
+				set_raw(-3);
+			}
+			else
+			{
+				push(variable_name);
+				push(variable_name);
+				push_c_closure(get);
+				set_raw(-3);
+			}
+
+			pop_n();
+		}
+
+		void end_class(const std::string& class_name)
 		{
 			push("mt");
 			get_raw(LUA_REGISTRYINDEX);
@@ -800,12 +955,135 @@ namespace luas
 			// store in registry
 
 			push_value(-2);
-			set_field(-2, class_name);
+			set_field(-2, class_name.c_str());
 			pop_n();
 
 			get_field(-1, "__class");
-			set_global(class_name);
+			set_global(class_name.c_str());
 			pop_n();
+		}
+
+	public:
+
+		state() {}
+		state(lua_State* _state) : _state(_state) {}									// mostly for views
+		state(lua_State* _state, bool oop) : _state(_state) { if (oop) init_oop(); }	// used by luas::ctx
+		~state() { make_invalid(); }
+
+		template <typename T, typename Ctor, typename... A>
+		bool register_class(const std::string& name, A&&... args)
+		{
+			static const auto type_info = TYPEINFO(T);
+
+			auto create = [](lua_State* L)
+			{
+				state s(L);
+
+				if (const auto class_info = s.get_info()->get_class(type_info))
+				{
+					ctor_caller<T>::call<Ctor>(s);
+
+					s.get_class(class_info->name);
+					s.set_metatable(-2);
+				}
+				else s.push_nil();
+
+				return 1;
+			};
+
+			auto destroy = [](lua_State* L)
+			{
+				state s(L);
+
+				T* obj; s.pop(obj, -1);
+
+				if (obj)
+				{
+					// call the dtor manually because the memory will be
+					// freed by lua
+
+					obj->~T();
+
+					s.push_bool(true);
+				}
+				else s.push_bool(false);
+
+				return 1;
+			};
+
+			// create state info if it doesn't exist
+
+			const auto state_info = get_info();
+
+			if (state_info->has_class(type_info))
+				return false;
+
+			const auto class_info = state_info->add_class(type_info);
+
+			class_info->name = name;
+
+			// start defining the class
+
+			auto iterate_args = []<typename I, typename Ix = std::remove_cvref_t<I>, typename... IA>(const auto& self, state* s, I && v, IA&&... args)
+			{
+				// register properties
+
+				const auto state_info = s->get_info();
+
+				if constexpr (std::derived_from<Ix, property_wrapper_base>)
+				{
+					s->add_class_variable(v.key, [](lua_State* L)	// setter
+					{
+						state s(L);
+
+						std::string field; s.pop(field);
+
+						if (const auto field_info = s.get_info()->get_class(type_info)->get_field_info(field))
+							return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::s)>>::call(s, field_info->write);
+
+						return s.push_nil();
+					}, [](lua_State* L)	// getter
+					{
+						state s(L);
+
+						std::string field; s.pop(field);
+
+						if (const auto field_info = s.get_info()->get_class(type_info)->get_field_info(field))
+							return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::g)>>::call(s, field_info->read);
+
+						return s.push_nil();
+					});
+
+					state_info->get_class(type_info)->add_field(v.key, v.s, v.g);
+				}
+				else if constexpr (std::derived_from<Ix, function_wrapper_base>)
+				{
+					s->add_class_function(v.key, [](lua_State* L)	// method
+					{
+						state s(L);
+
+						if (const auto fn = s.get_info()->get_class(type_info)->get_function(TYPEINFO(Ix::value)))
+							return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::value)>>::call(s, fn);
+
+						return s.push_nil();
+					});
+
+					state_info->get_class(type_info)->add_function(TYPEINFO(Ix::value), v.value);
+				}
+
+				if constexpr (sizeof...(IA) > 0)
+					self(self, s, std::forward<IA>(args)...);
+			};
+
+			begin_class();
+			add_class_function("create", create);
+			add_class_metamethod("__gc", destroy);
+
+			iterate_args(iterate_args, this, std::forward<A>(args)...);
+
+			end_class(name);
+
+			return true;
 		}
 
 		lua_State* get() const { return _state; }
@@ -840,6 +1118,8 @@ namespace luas
 			lua_close(_state);
 		}
 
+		template <typename... A>
+		void gc(int what, A&&... args) { lua_gc(_state, what, args...); }
 		void make_invalid() { _state = nullptr; }
 		void open_libs() const { luaL_openlibs(_state); }
 		void set_global(const char* index) const { lua_setglobal(_state, index); }
@@ -869,6 +1149,7 @@ namespace luas
 		}
 
 		void pop_n(int n = 1) const { lua_pop(_state, n); }
+
 		void exec_string(const std::string_view& code) const
 		{
 			if (luaL_dostring(_state, code.data()) != 0)
@@ -880,8 +1161,8 @@ namespace luas
 		template <typename T, typename... A>
 		int push(T&& value, A&&... args) const
 		{
-			auto r = _push(std::forward<T>(value));
-			return r + push(std::forward<A>(args)...);
+			auto c = _push(std::forward<T>(value));
+			return c + push(std::forward<A>(args)...);
 		}
 
 		template <typename T>
@@ -899,6 +1180,13 @@ namespace luas
 			pop_n();
 		}
 
+		template <typename T>
+		int pop_read(T& out, int i = -1) const
+		{
+			_pop(out, i);
+			return i + 1;
+		}
+
 		int push_nil() const { lua_pushnil(_state); return 1; }
 		int push_value(int i) const { lua_pushvalue(_state, i); return 1; }
 		int get_top() const { return lua_gettop(_state); }
@@ -912,6 +1200,7 @@ namespace luas
 		lua_Unsigned raw_len(int i) const { return lua_rawlen(_state, i); }
 
 		bool verify_table(int i) const { return lua_istable(_state, i) ? true : throw_error<bool>("Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i)); }
+		bool verify_function(int i) const { return lua_isfunction(_state, i) ? true : throw_error<bool>("Expected 'function' value, got '{}'", LUA_GET_TYPENAME(i)); }
 
 		value_ok<bool> to_bool(int i) const
 		{
@@ -957,13 +1246,17 @@ namespace luas
 		}
 
 		template <typename T>
-		constexpr value_ok<T> to_type(int i) const
+		constexpr value_ok<T> value_from_type(int i) const
 		{
 			if constexpr (detail::is_bool<T>)				return to_bool(i);
 			else if constexpr (detail::is_integer<T>)		return to_int(i);
 			else if constexpr (std::is_floating_point_v<T>) return to_number(i);
 			else if constexpr (detail::is_string<T>)		return to_string(i);
-			else if constexpr (detail::is_userdata<T>)		return { to_userdata<T>(i), true };
+			else if constexpr (detail::is_userdata<T>)
+			{
+				if (const auto ud = to_userdata<T>(i))
+					return { ud, true };
+			}
 
 			return { {}, false };
 		}
@@ -978,27 +1271,17 @@ namespace luas
 		bool call_safe_fn(const std::string& fn, int nreturns = 0, A&&... args) const
 		{
 			push_fn(fn);
-			push(args...);
 
-			return call_protected(sizeof...(A), nreturns);
+			return call_protected(push(args...), nreturns);
 		}
 
 		template <typename... A>
 		bool call_safe(int nreturns = 0, A&&... args) const
 		{
-			push(args...);
-
-			return call_protected(sizeof...(A), nreturns);
+			return call_protected(push(args...), nreturns);
 		}
 
-		/*bool call_safe(int nreturns, const std::vector<std::any>& args) const
-		{
-			push(args);
-
-			return call_protected(args.size(), nreturns);
-		}*/
-
-		//bool call_safe(int nreturns, const variadic_args& va) const;
+		bool call_safe(int nreturns, const variadic_args& va) const;
 	};
 
 	class variadic_args
@@ -1017,6 +1300,7 @@ namespace luas
 
 	public:
 
+		variadic_args() {}
 		variadic_args(const state* vm, int first, int last) : vm(vm->get()), first(first), last(last), current(first) {}
 		~variadic_args() { vm.make_invalid(); }
 
@@ -1025,8 +1309,8 @@ namespace luas
 		int begin() const { return first + stack_offset; }
 		int end() const { return last + stack_offset; }
 
-		//template <typename T>
-		//T get(int i) const { return vm.pop_read<T>(begin() + i); }
+		template <typename T>
+		T get(int i) const { return vm.value_from_type<T>(begin() + i).first; }
 
 		int get_type(int i) const { return lua_type(*vm, begin() + i); }
 
@@ -1040,12 +1324,12 @@ namespace luas
 			// order so everytime we push, the same index will be the next
 			// parameter
 
-			int r = 0;
+			int c = 0;
 
 			for (int i = _begin; i <= end(); ++i)
-				r += vm.push_value(_begin);
+				c += vm.push_value(_begin);
 
-			return r;
+			return c;
 		}
 	};
 
@@ -1060,17 +1344,25 @@ namespace luas
 	struct lua_c_caller
 	{
 		template <typename... A, typename... In>
-		static int push_and_call_impl(state& _s, In&&... args) requires (detail::is_empty_args<A>)
+		static int _impl(state& _s, int nargs, [[maybe_unused]] int i, In&&... args) requires (detail::is_empty_args<A>)
 		{
 			using return_type = detail::fn_return_type_v<Fn>;
 
+			const auto pop_args = [&]() { if (nargs > 0) _s.pop_n(nargs); };
 			const auto fn = *_s.to_userdata<Fn*>(_s.upvalue_index(1));
 
+			print_stack(_s.get());
+
 			if constexpr (std::is_void_v<return_type>)
+			{
 				fn(args...);
+				pop_args();
+			}
 			else
 			{
 				const auto ret = fn(args...);
+
+				pop_args();
 
 				if constexpr (detail::is_tuple<return_type>)
 				{
@@ -1079,24 +1371,20 @@ namespace luas
 					return std::tuple_size_v<return_type>;
 				}
 				else if constexpr (!std::is_void_v<return_type>)
-				{
-					_s.push(ret);
-
-					return 1;
-				}
+					return _s.push(ret);
 			}
 
 			return 0;
 		}
 
 		template <typename T, typename... A, typename... In>
-		static int push_and_call_impl(state& _s, In&&... args)
+		static int _impl(state& _s, int nargs, int i, In&&... args)
 		{
 			using type = detail::remove_cvref_t<T>;
 
-			type value; _s.pop(value);
-
-			return push_and_call_impl<A...>(_s, std::forward<type>(value), std::forward<In>(args)...);
+			type value;
+			
+			return _impl<A...>(_s, nargs, _s.pop_read(value, i), std::forward<type>(value), std::forward<In>(args)...);
 		}
 
 		template <typename T>
@@ -1105,16 +1393,16 @@ namespace luas
 		template <typename R, typename... A>
 		struct caller<R(*)(A...)>
 		{
-			static int push_and_call(state& _s) { variadic_arg_check<A...>(); return push_and_call_impl<A...>(_s); }
+			static int _do(state& _s, int i) { variadic_arg_check<A...>(); return _impl<A...>(_s, -i, i); }
 		};
 
 		template <typename R, typename... A>
 		struct caller<R(*)(state&, A...)>
 		{
-			static int push_and_call(state& _s) { variadic_arg_check<A...>(); return push_and_call_impl<A...>(_s, _s); }
+			static int _do(state& _s, int i) { variadic_arg_check<A...>(); return _impl<A...>(_s, -i, i, _s); }
 		};
 
-		static int call(state& _s) { return caller<Fn>::push_and_call(_s); }
+		static int call(state& _s, int nargs) { return caller<Fn>::_do(_s, -nargs); }
 	};
 
 	struct lua_fn
@@ -1186,24 +1474,22 @@ namespace luas
 		}
 	};
 
-	/*inline bool state::call_safe(int nreturns, const variadic_args& va) const
+	inline bool state::call_safe(int nreturns, const variadic_args& va) const
 	{
 		// set the stack offset to -1 because we pushed the function before
 
 		va.set_stack_offset(-1);
 		
-		// push all variadic arguments
+		// push all variadic arguments & call function
 
-		push(va);
-
-		return call_protected(va.size(), nreturns);
+		return call_protected(push(va), nreturns);
 	}
 
 	template <typename T>
 	int state::_push(const T& value) const requires(std::is_same_v<T, variadic_args>)
 	{
 		return value.push_all();
-	}*/
+	}
 
 	template <typename T>
 	void state::_pop(T& value, int& i) const requires(std::is_same_v<T, lua_fn>)
@@ -1244,17 +1530,11 @@ namespace luas
 		template <typename T, typename Fn>
 		void register_fn(const char* index, Fn&& fn)
 		{
-			const auto function = [](lua_State* _state) -> int
+			const auto function = [](lua_State* L) -> int
 			{
-				state vm(_state);
+				state s(L);
 
-				static constexpr int expected_nargs = detail::fn_args_count_v<T>;
-
-				// todo - do check somewhere else
-				// 
-				//if (const int nargs = vm.get_top(); expected_nargs == nargs)
-					return lua_c_caller<T>::call(vm);
-				//else return state::_throw_error(*vm, "Expected {} arguments, got {}", expected_nargs, nargs);
+				return lua_c_caller<T>::call(s, s.get_top());
 			};
 
 			const auto fn_obj_loc = vm->new_userdata<T>();
@@ -1273,10 +1553,11 @@ namespace luas
 		{
 			vm = new state(luaL_newstate(), oop);
 
-			check_fatal(vm, "Could not allocate new");
+			check_fatal(vm, "Could not allocate vm");
 
 			vm->set_panic();
 			vm->open_libs();
+			vm->gc(LUA_GCGEN, 20, 100);
 		}
 
 		ctx(const ctx&) = delete;
@@ -1326,6 +1607,12 @@ namespace luas
 		{
 			vm->push(value);
 			vm->set_global(index);
+		}
+
+		template <typename T, typename Ctor, typename... A>
+		bool register_class(const std::string& name, A&&... args)
+		{
+			return vm->register_class<T, Ctor, A...>(name, std::forward<A>(args)...);
 		}
 	};
 };

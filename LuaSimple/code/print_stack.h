@@ -1,5 +1,3 @@
 #pragma once
 
-#include <luas.h>
-
-void print_stack(lua_State* L);
+void print_stack(struct lua_State* L);

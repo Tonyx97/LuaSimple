@@ -1,6 +1,8 @@
 // printstack.c
 //
 
+#include <luas.h>
+
 #include "print_stack.h"
 
 #include <assert.h>
