@@ -323,17 +323,45 @@ namespace luas
 		}
 	};
 
-	struct state_info
+	class state_info
 	{
-		struct oop_class
+	private:
+
+		class oop_class
 		{
+		public:
+
 			std::string name;
 
-			std::unordered_map<std::string, member_access_fns> index_members;
+		private:
+
+			std::unordered_map<std::string, member_access_fns> fields;
 			std::unordered_map<type_info*, void*> functions;
+
+		public:
+
+			member_access_fns* get_field_info(const std::string& key)
+			{
+				auto it = fields.find(key);
+				return it != fields.end() ? &it->second : nullptr;
+			}
+
+			void* get_function(type_info* type)
+			{
+				auto it = functions.find(type);
+				return it != functions.end() ? it->second : nullptr;
+			}
+
+			template <typename T>
+			void add_function(type_info* type, T&& v) { functions[type] = std::bit_cast<void*>(std::move(v)); }
+
+			template <typename S, typename G>
+			void add_field(const std::string& key, S&& setter, G&& getter) { fields[key] = member_access_fns(setter, getter); }
 		};
 
 		std::unordered_map<type_info*, oop_class> classes;
+
+	public:
 
 		oop_class* add_class(type_info* type) { return &classes[type]; }
 
@@ -346,7 +374,7 @@ namespace luas
 		bool has_class(type_info* type) const { return classes.contains(type); }
 	};
 
-	inline std::unordered_map<lua_State*, state_info> states_info;	// todo
+	inline std::unordered_map<lua_State*, state_info> states_info;
 
 	class state
 	{
@@ -678,7 +706,6 @@ namespace luas
 		void push_number(lua_Number v) const { lua_pushnumber(_state, v); }
 		void push_string(const std::string& v) const { lua_pushstring(_state, v.c_str()); }
 		void push_userdata(void* v) const { if (v) lua_pushlightuserdata(_state, v); else lua_pushnil(_state); }
-		void push_nil() const { lua_pushnil(_state); }
 		void push_table() const { lua_newtable(_state); }
 		void set_metatable(int i) const { lua_setmetatable(_state, i); }
 		void set_raw(int i) const { lua_rawset(_state, i); }
@@ -736,6 +763,7 @@ namespace luas
 			return value;
 		}
 
+		int push_nil() const { lua_pushnil(_state); return 1; }
 		int push_value(int i) const { lua_pushvalue(_state, i); return 1; }
 		int get_top() const { return lua_gettop(_state); }
 		int get_field(int i, const char* k) const { return lua_getfield(_state, i, k); }
