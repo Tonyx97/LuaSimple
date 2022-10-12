@@ -515,122 +515,6 @@ namespace luas
 		template <typename T = int, typename... A>
 		static T _throw_error(lua_State* vm, const std::string& err, const A&... args) { _on_error(vm, FORMATV(err, args...)); return T{}; }
 
-		static int oop_obj_create(lua_State* L)	// todo - clean
-		{
-			state s(L);
-
-			if (!s.verify_table(1))
-				return 0;
-
-			int stack = s.get_top();
-
-			s.push(OOP_CREATE_FN_NAME());
-			s.get_raw(1);
-
-			if (s.verify_function(-1))
-			{
-				for (int i = 2; i <= stack; ++i)
-					s.push_value(i);
-
-				s.call_protected(stack - 1, LUA_MULTRET);
-
-				return s.get_top() - stack;
-			}
-
-			s.pop_n();
-
-			return 1;
-		}
-
-		static int index_function(lua_State* L)	// todo - clean
-		{
-			lua_pushvalue(L, lua_upvalueindex(1));            // ud, k, mt
-
-			// First we look for a function
-			lua_pushstring(L, "__class");            // ud, k, mt, "__class"
-			lua_rawget(L, -2);                       // ud, k, mt, __class table
-
-			if (!lua_istable(L, -1))
-			{
-				lua_pop(L, 1);            // ud, k, mt
-				return 1;
-			}
-
-			lua_pushvalue(L, 2);            // ud, k, mt, __class table, k
-			lua_rawget(L, -2);              // ud, k, mt, __class table, function
-			lua_remove(L, -2);              // ud, k, mt, function
-
-			if (lua_isfunction(L, -1))
-			{                                     // Found the function, clean up and return
-				lua_remove(L, -2);            // ud, k, function
-
-				return 1;
-			}
-			lua_pop(L, 1);            // ud, k, mt
-
-			// Function not found, look for property
-			lua_pushstring(L, "__get");            // ud, k, mt, "__get"
-			lua_rawget(L, -2);                     // ud, k, mt, __get table
-
-			if (!lua_istable(L, -1))
-			{
-				lua_pop(L, 1);            // ud, k, mt
-				return 1;
-			}
-
-			lua_pushvalue(L, 2);            // ud, k, mt, __get table, k
-			lua_rawget(L, -2);              // ud, k, mt, __get table, function
-			lua_remove(L, -2);              // ud, k, mt, function
-
-			if (lua_isfunction(L, -1))
-			{                                     // Found the property,
-				lua_remove(L, -2);            // ud, k, function
-
-				lua_pushvalue(L, 1);            // push field
-				lua_pushvalue(L, 2);            // push userdata
-				lua_call(L, 2, 1);              // ud, k, result
-
-				return 1;
-			}
-			lua_pop(L, 1);            // ud, k, mt
-
-			return 1;
-		}
-
-		static int newindex_function(lua_State* L)	// todo - clean
-		{
-			lua_pushvalue(L, lua_upvalueindex(1));            // ud, k, v, mt
-
-			lua_pushstring(L, "__set");            // ud, k, v, mt, "__set"
-			lua_rawget(L, -2);                     // ud, k, v, mt, __set table
-
-			if (!lua_istable(L, -1))
-			{
-				lua_pop(L, 1);            // ud, k, v, mt
-				return 0;
-			}
-
-			lua_pushvalue(L, 2);            // ud, k, v, mt, __set table, k
-			lua_rawget(L, -2);              // ud, k, v, mt, __set table, function
-			lua_remove(L, -2);              // ud, k, v, mt, function
-
-			if (lua_isfunction(L, -1))
-			{                                       // Found the property
-				lua_pushvalue(L, 3);            // ud, k, v, mt, function, ud, v
-				lua_pushvalue(L, 1);            // ud, k, v, mt, function, ud
-				lua_pushvalue(L, 2);            // push field
-
-				lua_call(L, 3, 0);            // ud, k, v, mt
-				lua_pop(L, 1);            // ud, k, v
-
-				return 0;
-			}
-
-			lua_pop(L, 1);            // ud, k, v, mt
-
-			return 0;
-		}
-		
 		static int read_only(lua_State* L)
 		{
 			luaL_error(L, "Property %s is read-only", lua_tostring(L, lua_upvalueindex(1)));
@@ -645,6 +529,137 @@ namespace luas
 			return 1;
 		}
 
+		static int oop_obj_create(lua_State* L)	// todo - clean
+		{
+			state s(L);
+
+			if (!s.is_table(1))
+				return 0;
+
+			int stack = s.get_top();
+
+			s.push(OOP_CREATE_FN_NAME());
+			s.get_raw(1);
+
+			if (s.is_function(-1))
+			{
+				for (int i = 2; i <= stack; ++i)
+					s.push_value(i);
+
+				s.call_protected(stack - 1, LUA_MULTRET);
+
+				return s.get_top() - stack;
+			}
+
+			s.pop_n();
+
+			return 1;
+		}
+
+		static int index_function(lua_State* L)
+		{
+			state s(L);
+
+			s.push_value(s.upvalue_index(1));
+
+			// first we look for a function
+
+			s.push("__class");
+			s.get_raw(-2);
+
+			if (!s.is_table(-1))
+			{
+				s.pop_n();
+				return 1;
+			}
+
+			s.push_value(2);
+			s.get_raw(-2);
+			s.remove(-2);
+
+			if (s.is_function(-1))
+			{
+				// found the function, clean up and return
+
+				s.remove(-2);
+
+				return 1;
+			}
+
+			s.pop_n();
+
+			// function not found, look for property
+
+			s.push("__get");
+			s.get_raw(-2);
+
+			if (!s.is_table(-1))
+			{
+				s.pop_n();
+				return 1;
+			}
+			
+			s.push_value(2);
+			s.get_raw(-2);
+			s.remove(-2);
+
+			if (s.is_function(-1))
+			{
+				// found the property
+
+				s.remove(-2);
+
+				s.push_value(1);	// push field
+				s.push_value(2);	// push userdata
+				s.call_protected(2, 1);
+
+				return 1;
+			}
+
+			s.pop_n();
+
+			return 1;
+		}
+
+		static int newindex_function(lua_State* L)
+		{
+			state s(L);
+
+			s.push_value(s.upvalue_index(1));
+
+			s.push("__set");
+			s.get_raw(-2);
+
+			if (!s.is_table(-1))
+			{
+				s.pop_n();
+				return 0;
+			}
+
+			s.push_value(2);
+			s.get_raw(-2);
+			s.remove(-2);
+
+			if (s.is_function(-1))
+			{
+				// found the property
+
+				s.push_value(3);	// push new value
+				s.push_value(1);	// push userdata
+				s.push_value(2);	// push field
+
+				s.call_protected(3, 0);
+
+				s.pop_n();
+
+				return 0;
+			}
+
+			s.pop_n();
+
+			return 0;
+		}
+
 		template <typename T = int, typename... A>
 		T throw_error(const std::string& err, A&&... args) const { _on_error(_state, FORMATV(err, args...)); return T {}; }
 
@@ -652,14 +667,14 @@ namespace luas
 		{
 			get_global(fn);
 
-			if (!lua_isfunction(_state, -1))
+			if (!is_function(-1))
 				throw_error("Function {} undefined", fn);
 		}
 
 		template <typename Key, typename Value, typename Fn>
 		bool iterate_table(const Fn& fn, int i) const
 		{
-			if (!verify_table(i))
+			if (!is_table(i))
 				return true;
 
 			const auto _fail = [this]() { pop_n(2); return false; };
@@ -1141,7 +1156,7 @@ namespace luas
 			push("mt");
 			get_raw(LUA_REGISTRYINDEX);
 
-			check_fatal(lua_istable(_state, -1), "lua_getclass expected a table");
+			check_fatal(is_table(-1), "lua_getclass expected a table");
 
 			push(class_name);
 			get_raw(-2);
@@ -1199,8 +1214,8 @@ namespace luas
 
 		lua_Unsigned raw_len(int i) const { return lua_rawlen(_state, i); }
 
-		bool verify_table(int i) const { return lua_istable(_state, i) ? true : throw_error<bool>("Expected 'table' value, got '{}'", LUA_GET_TYPENAME(i)); }
-		bool verify_function(int i) const { return lua_isfunction(_state, i) ? true : throw_error<bool>("Expected 'function' value, got '{}'", LUA_GET_TYPENAME(i)); }
+		bool is_table(int i) const { return lua_istable(_state, i); }
+		bool is_function(int i) const { return lua_isfunction(_state, i); }
 
 		value_ok<bool> to_bool(int i) const
 		{
@@ -1351,8 +1366,6 @@ namespace luas
 			const auto pop_args = [&]() { if (nargs > 0) _s.pop_n(nargs); };
 			const auto fn = *_s.to_userdata<Fn*>(_s.upvalue_index(1));
 
-			print_stack(_s.get());
-
 			if constexpr (std::is_void_v<return_type>)
 			{
 				fn(args...);
@@ -1496,7 +1509,7 @@ namespace luas
 	{
 		const auto index = i++;
 
-		if (!lua_isfunction(_state, index))
+		if (!is_function(index))
 			return throw_error<T>("Expected 'function' value, got '{}'", LUA_GET_TYPENAME(index));
 
 		push_value(index);
