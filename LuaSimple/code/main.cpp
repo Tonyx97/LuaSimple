@@ -75,95 +75,6 @@ struct TimeProfiling
 
 using namespace luas;
 
-int index_function(lua_State* L)
-{
-	lua_pushvalue(L, lua_upvalueindex(1));            // ud, k, mt
-
-	// First we look for a function
-	lua_pushstring(L, "__class");            // ud, k, mt, "__class"
-	lua_rawget(L, -2);                       // ud, k, mt, __class table
-
-	if (!lua_istable(L, -1))
-	{
-		lua_pop(L, 1);            // ud, k, mt
-		return 1;
-	}
-
-	lua_pushvalue(L, 2);            // ud, k, mt, __class table, k
-	lua_rawget(L, -2);              // ud, k, mt, __class table, function
-	lua_remove(L, -2);              // ud, k, mt, function
-
-	if (lua_isfunction(L, -1))
-	{                                     // Found the function, clean up and return
-		lua_remove(L, -2);            // ud, k, function
-
-		return 1;
-	}
-	lua_pop(L, 1);            // ud, k, mt
-
-	// Function not found, look for property
-	lua_pushstring(L, "__get");            // ud, k, mt, "__get"
-	lua_rawget(L, -2);                     // ud, k, mt, __get table
-
-	if (!lua_istable(L, -1))
-	{
-		lua_pop(L, 1);            // ud, k, mt
-		return 1;
-	}
-
-	lua_pushvalue(L, 2);            // ud, k, mt, __get table, k
-	lua_rawget(L, -2);              // ud, k, mt, __get table, function
-	lua_remove(L, -2);              // ud, k, mt, function
-
-	if (lua_isfunction(L, -1))
-	{                                     // Found the property,
-		lua_remove(L, -2);            // ud, k, function
-
-		lua_pushvalue(L, 1);            // push field
-		lua_pushvalue(L, 2);            // push userdata
-		lua_call(L, 2, 1);              // ud, k, result
-
-		return 1;
-	}
-	lua_pop(L, 1);            // ud, k, mt
-
-	return 1;
-}
-
-int newindex_function(lua_State* L)
-{
-	lua_pushvalue(L, lua_upvalueindex(1));            // ud, k, v, mt
-
-	lua_pushstring(L, "__set");            // ud, k, v, mt, "__set"
-	lua_rawget(L, -2);                     // ud, k, v, mt, __set table
-
-	if (!lua_istable(L, -1))
-	{
-		lua_pop(L, 1);            // ud, k, v, mt
-		return 0;
-	}
-
-	lua_pushvalue(L, 2);            // ud, k, v, mt, __set table, k
-	lua_rawget(L, -2);              // ud, k, v, mt, __set table, function
-	lua_remove(L, -2);              // ud, k, v, mt, function
-
-	if (lua_isfunction(L, -1))
-	{                                       // Found the property
-		lua_pushvalue(L, 2);            // push field
-		lua_pushvalue(L, 1);            // ud, k, v, mt, function, ud
-		lua_pushvalue(L, 3);            // ud, k, v, mt, function, ud, v
-
-		lua_call(L, 3, 0);            // ud, k, v, mt
-		lua_pop(L, 1);            // ud, k, v
-
-		return 0;
-	}
-
-	lua_pop(L, 1);            // ud, k, v, mt
-
-	return 0;
-}
-
 int read_only(lua_State* L)
 {
 	luaL_error(L, "Property %s is read-only", lua_tostring(L, lua_upvalueindex(1)));
@@ -221,63 +132,6 @@ void lua_classvariable(lua_State* L, const char* variable_name, lua_CFunction se
 	lua_pop(L, 1);
 }
 
-void lua_classmetamethod(lua_State* L, const char* method_name, lua_CFunction fn)
-{
-	if (fn)
-	{
-		lua_pushstring(L, method_name);
-		lua_pushstring(L, method_name);
-		lua_pushcclosure(L, fn, 1);
-		lua_rawset(L, -3);
-	}
-}
-
-void lua_newclass(lua_State* L)
-{
-	lua_newtable(L);				// obj_table
-
-	lua_pushstring(L, "__class");
-	lua_newtable(L);				// class_table
-	state(L).get_class("Generic");
-	lua_setmetatable(L, -2);		// class_table.__metatable = generic_table
-	lua_rawset(L, -3);				// REGISTRY["_class"] = obj_table
-
-	lua_pushstring(L, "__get");
-	lua_newtable(L);
-	lua_rawset(L, -3);
-
-	lua_pushstring(L, "__set");
-	lua_newtable(L);
-	lua_rawset(L, -3);
-
-	lua_pushstring(L, "__index");
-	lua_pushvalue(L, -2);
-	lua_pushcclosure(L, index_function, 1);
-	lua_rawset(L, -3);
-
-	lua_pushstring(L, "__newindex");
-	lua_pushvalue(L, -2);
-	lua_pushcclosure(L, newindex_function, 1);
-	lua_rawset(L, -3);
-}
-
-void lua_registerclass(lua_State* L, const char* class_name)
-{
-	lua_pushstring(L, "mt");
-	lua_rawget(L, LUA_REGISTRYINDEX);	// mt_table = REGISTRY["mt"]
-
-	// store in registry
-	lua_pushvalue(L, -2);
-	lua_setfield(L, -2, class_name);	// mt_table[class_name] = mt_table
-
-	lua_pop(L, 1);
-
-	lua_getfield(L, -1, "__class");
-	lua_setglobal(L, class_name);
-
-	lua_pop(L, 1);
-}
-
 void lua_classfunction(lua_State* L, const char* fn_name, lua_CFunction fn)
 {
 	if (fn)
@@ -301,11 +155,27 @@ struct smol
 
 struct vec3
 {
+	static inline int allocs = 0,
+					  frees = 0;
+
 	float x = 0.f, y = 0.f, z = 0.f;
 
-	vec3() {}
-	vec3(float x, float y, float z) : x(x), y(y), z(z) {/* printf_s("[vec3] ctor %.2f %.2f %.2f\n", x, y, z); */ }
-	~vec3() { /*printf_s("[vec3] dtor\n"); */ }
+	std::vector<uint64_t> test;
+
+	vec3() { for (int i = 0; i < 1000; ++i) test.push_back(i); }
+	vec3(float x, float y, float z) : x(x), y(y), z(z) { printf_s("[ALLOC] %i %i\n", ++allocs, frees); for (int i = 0; i < 1000; ++i) test.push_back(i); }
+	~vec3()
+	{
+		printf_s("[FREE] %i %i (size: %i)\n", allocs, ++frees, test.size());
+
+		test.clear();
+		test.shrink_to_fit();
+	}
+
+	/*vec3(const vec3& v)
+	{
+		test = std::move(v.test);
+	}*/
 
 	float get_x() { return x; }
 	float get_y() { return y; }
@@ -328,15 +198,19 @@ template <typename ObjType>
 struct ctor_caller
 {
 	template <typename... A, typename... In>
-	static void push_and_call_impl(state& _s, int nargs, [[maybe_unused]] int i, In&&... args) requires (detail::is_empty_args<A...>)
+	static void _impl(state& _s, In&&... args) requires (detail::is_empty_args<A...>)
 	{
-		new (lua_newuserdata(_s.get(), sizeof(ObjType))) ObjType(args...);
+		*std::bit_cast<ObjType**>(_s.new_userdata<ObjType>()) = new ObjType(args...);
 	}
 
 	template <typename T, typename... A, typename... In>
-	static void push_and_call_impl(state& _s, int nargs, int i, In&&... args)
+	static void _impl(state& _s, In&&... args)
 	{
-		push_and_call_impl<A...>(_s, nargs, i, args..., _s.pop_track<T>(i));
+		using type = detail::remove_cvref_t<T>;
+
+		type value; _s.pop(value);
+
+		_impl<A...>(_s, std::forward<type>(value), std::forward<In>(args)...);
 	}
 
 	template <typename T>
@@ -345,11 +219,11 @@ struct ctor_caller
 	template <typename R, typename... A>
 	struct caller<R(A...)>
 	{
-		static void push_and_call(state& _s, int nargs) { push_and_call_impl<A...>(_s, nargs, -nargs); }
+		static void _do(state& _s) { _impl<A...>(_s); }
 	};
 
 	template <typename Ctor>
-	static void call(state& _s, int nargs) { caller<Ctor>::push_and_call(_s, nargs); }
+	static void call(state& _s) { caller<Ctor>::_do(_s); }
 };
 
 template <typename T>
@@ -362,29 +236,48 @@ template <typename R, typename Tx, typename... A>
 struct class_fn_caller<R(__thiscall*)(Tx*, A...)>
 {
 	template <typename... Args, typename... In>
-	static int _impl(state& _s, void* fn, Tx* _this, int nargs, [[maybe_unused]] int i, In... args) requires (detail::is_empty_args<Args>)
+	static int _impl(state& _s, void* fn, Tx** _this, In&&... args) requires (detail::is_empty_args<Args>)
 	{
-		if constexpr (std::is_void_v<R>)
-			std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(_this, args...);
-		else if constexpr (is_return_type_in_eax<R>)
-			return _s.push(std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(_this, args...));
-		else
+		if (const auto this_read = *_this)
 		{
-			R out;
+			if constexpr (std::is_void_v<R>)
+				std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(this_read, args...);
+			else if constexpr (is_return_type_in_eax<R>)
+				return _s.push(std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(this_read, args...));
+			else
+			{
+				R out;
 
-			return _s.push(std::bit_cast<R*(__thiscall*)(Tx*, R*, A...)>(fn)(_this, &out, args...));
+				std::bit_cast<R*(__thiscall*)(Tx*, R*, A&&...)>(fn)(this_read, &out, std::forward<A>(args)...);
+
+				_s.push(out);
+				return 1;
+
+				//return _s.push(std::bit_cast<R*(__thiscall*)(Tx*, R*, A...)>(fn)(this_read, &out, args...));
+			}
 		}
 
 		return 0;
 	}
 
 	template <typename T, typename... Args, typename... In>
-	static int _impl(state& _s, void* fn, Tx* _this, int nargs, int i, In&&... args)
+	static int _impl(state& _s, void* fn, Tx** _this, In&&... args)
 	{
-		return _impl<Args...>(_s, fn, _this, nargs, i, args..., _s.pop_track<T>(i));
+		using type = detail::remove_cvref_t<T>;
+
+		type value; _s.pop(value);
+
+		return _impl<Args...>(_s, fn, _this, std::forward<In>(args)..., std::forward<type>(value));
 	}
 
-	static int call(state& _s, void* fn, int nargs) { variadic_arg_check<A...>(); return _impl<A...>(_s, fn, _s.pop_read<Tx*>(-nargs), nargs, -nargs + 1); }
+	static int call(state& _s, void* fn, int i)
+	{
+		variadic_arg_check<A...>();
+
+		Tx** _this; _s.pop(_this, i);
+		
+		return _impl<A...>(_s, fn, _this);
+	}
 };
 
 template <typename T, typename Ctor, typename... A>
@@ -398,7 +291,7 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 
 		if (const auto class_info = s.get_info()->get_class(type_info))
 		{
-			ctor_caller<T>::call<Ctor>(s, s.get_top());
+			ctor_caller<T>::call<Ctor>(s);
 
 			s.get_class(class_info->name);
 			s.set_metatable(-2);
@@ -410,15 +303,15 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 
 	auto destroy = [](lua_State* L)
 	{
-		if (const auto obj = (T*)lua_touserdata(L, -1))
-		{
-			// call destructor before lua frees the instance
-			
-			obj->~T();
+		state s(L);
 
-			lua_pushboolean(L, true);
+		if (auto obj = s.pop_read<T**>(-1))
+		{
+			delete *obj;
+
+			s.push_bool(true);
 		}
-		else lua_pushboolean(L, false);
+		else s.push_bool(false);
 
 		return 1;
 	};
@@ -473,8 +366,8 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 			{
 				state s(L);
 
-				if (const auto fn_ptr = s.get_info()->get_class(type_info)->get_function(TYPEINFO(Ix::value)))
-					return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::value)>>::call(s, fn_ptr, s.get_top());
+				if (const auto fn = s.get_info()->get_class(type_info)->get_function(TYPEINFO(Ix::value)))
+					return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::value)>>::call(s, fn, -1);
 
 				return s.push_nil();
 			});
@@ -486,13 +379,13 @@ bool register_class(ctx& cs, const std::string& name, A&&... args)
 			self(self, L, std::forward<IA>(args)...);
 	};
 
-	lua_newclass(L);
+	s->begin_class();
 	lua_classfunction(L, "create", create);
-	lua_classmetamethod(L, "__gc", destroy);
+	s->add_class_metamethod("__gc", destroy);
 
 	iterate_args(iterate_args, L, std::forward<A>(args)...);
 
-	lua_registerclass(L, name.c_str());
+	s->end_class(name.c_str());
 
 	return true;
 }
@@ -503,22 +396,10 @@ int main()
 	
 #if COMPILE_LUAWRAPPER
 	{
-		LuaContext lua{};
-
-		lua.writeVariable("a",
-			std::vector<std::string>
-		{
-			"hello",
-				"goodbye",
-				"how are",
-				"you"
-		}
-		);
-		
+		LuaContext lua {};
+		lua.writeVariable("a", std::vector<std::string> { "hello", "goodbye", "how are", "you" });
 		lua.registerFunction("tt", &vec3::get_x);
-
-		lua.executeCode(R"(
-)");
+		lua.executeCode(R"()");
 	}
 #endif
 
@@ -541,30 +422,41 @@ int main()
 
 	script.exec_string(R"(
 function test()
+
 	local a = vec3(1, 2, 3);
 	local a2 = vec3(10, 20, 30);
-	local a3 = getVec();
 
-	a.y = 100.0;
+	a:add(a2);
+	
+	--local a2 = getVec(100.0, 200.0, 300.0);
 
-	local l = a:len();
-	local b = a:add(a2:add(a3));
-
-	b.y = b.y + l;
-
-	--print("------ " .. tostring(l) .. " -----");
 	--print(tostring(a.x) .. ", " .. tostring(a.y) .. ", " .. tostring(a.z));
-	--print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));
+	--print(tostring(a2.x) .. ", " .. tostring(a2.y) .. ", " .. tostring(a2.z));
+	
+--[[local a = vec3(1, 2, 3);
+local a2 = vec3(10, 20, 30);
+local a3 = getVec();
 
-	--collectgarbage();
+a.y = 100.0;
+
+--local l = a:len();
+--local b = a:add(a2:add(a3));
+
+--b.y = b.y + l;
+
+--print("------ " .. tostring(l) .. " -----");
+--print(tostring(a.x) .. ", " .. tostring(a.y) .. ", " .. tostring(a.z));
+--print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));]]
+
+collectgarbage();
 end
 )");
 
-	script.add_function("getVec", [](state& s)
+	script.add_function("getVec", [](float x, float y, float z)
 	{
 		//printf_s("lol %.2f %.2f %.2f\n", obj->x, obj->y, obj->z);
 
-		return vec3(10.f, 20.f, 30.f);
+		return vec3(x, y, z);
 	});
 
 	BringWindowToTop(GetConsoleWindow());
@@ -573,10 +465,10 @@ end
 	{
 		debug_memory();
 
-		//printf_s("\n--------------------------\n");
+		printf_s("\n----------- TICK -----------\n");
 
 		{
-			TimeProfiling tp("time test");
+			//TimeProfiling tp("time test");
 
 			script.call_safe("test");
 		}
