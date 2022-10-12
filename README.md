@@ -8,6 +8,7 @@
 - Calling Lua functions from C++ and viceversa.
 - Multiple Returns.
 - Variadic Arguments.
+- OOP Basic Support.
 - Store Lua functions and call them from C++ whenever you want.
 - Moving and modifying tables from C++ to Lua and viceversa.
 - Since the wrapper focus on most important things, the code is not as templated as other wrappers so compile times are very acceptable for big projects. For example, in a high-end CPU it would take around 25 seconds to compile 8100 templated functions which is actually fast if you compare it to other wrappers (some of them can't even compile 8100 functions due to compiler overhead...).
@@ -116,6 +117,63 @@ addEvent(10.0, "test");
 /* OUTPUT BELOW */
 // There is a total of 2 arguments
 // 10 | test
+```
+- - - -
+# OOP
+
+There is basic support for classes implementation:
+
+```cpp
+struct vec3
+{
+	static inline int allocs = 0,
+					  frees = 0;
+
+	float x = 0.f, y = 0.f, z = 0.f;
+
+	//std::vector<uint64_t> test;
+
+	vec3()												{ /*printf_s("[ALLOC 1 %p] %i %i\n", this, ++allocs, frees);*/ /*for (int i = 0; i < 1000; ++i) test.push_back(i);*/ }
+	vec3(float x, float y, float z) : x(x), y(y), z(z)	{ /*printf_s("[ALLOC 2 %p] %i %i\n", this, ++allocs, frees);*/ /*for (int i = 0; i < 1000; ++i) test.push_back(i);*/ }
+	~vec3()												{ /*printf_s("[FREE %p] %i %i (size: %i)\n", this, allocs, ++frees, test.size());*/ }
+
+	float get_x() { return x; }
+	float get_y() { return y; }
+	float get_z() { return z; }
+
+	void set_x(float v) { x = v; }
+	void set_y(float v) { y = v; }
+	void set_z(float v) { z = v; }
+
+	vec3 add(const vec3& v)
+	{
+		return { x + v.x, y + v.y, z + v.z };
+	}
+
+	float length() const { return std::sqrtf(x * x + y * y + z * z); }
+};
+
+luas::ctx script;
+
+script.register_class<vec3, vec3(float, float, float)>(	// it only supports 1 constructor for now
+  "vec3",
+  luas::property("x", &vec3::set_x, &vec3::get_x),
+  luas::property("y", &vec3::set_y, &vec3::get_y),
+  luas::property("z", &vec3::set_z, &vec3::get_z),
+  luas::function("len", &vec3::length),
+  luas::function("add", &vec3::add)
+);
+
+// and then you can use it like this
+
+script.exec_string(R("
+local a = vec3(1, 2, 3);
+local a2 = vec3(10, 20, 30);
+local a3 = vec3(100, 200, 300);
+
+local l = a:len();
+local b = a:add(a2:add(a3));
+"));
 ```
 - - - -
 # Store and Call Lua functions in C++
