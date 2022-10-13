@@ -257,6 +257,9 @@ namespace luas
 
 		template <typename T>
 		concept does_ret_type_fit_in_eax = std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_pointer_v<T>;
+
+		template <typename T>
+		using aligned_storage = std::aligned_storage_t<sizeof(T), alignof(T)>;
 	}
 
 	namespace tuple
@@ -468,7 +471,7 @@ namespace luas
 					return _s.push(std::bit_cast<R(__thiscall*)(Tx*, A...)>(fn)(_this, args...));
 				else
 				{
-					using _R = std::aligned_storage_t<sizeof(R), alignof(R)>;
+					using _R = detail::aligned_storage<R>;
 
 					_R out;
 
