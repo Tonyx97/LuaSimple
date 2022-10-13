@@ -145,7 +145,7 @@ int main()
 
 	//printf_s("0x%x\n", script.get()->get_global_var<std::string>("test").c_str());
 
-	script.add_function("getVec", [](vec3 v)
+	script.add_function("getVec", [](ay* a, const vec3& v)
 	{
 		//return std::vector<int>({ 1, 2, 3, 4, 5 });
 		printf_s("%.2f %.2f %.2f\n", v.x, v.y, v.z);
@@ -156,7 +156,7 @@ function test()
 
 	local a = vec3(1, 2, 3);
 
-	getVec(a);
+	getVec(nil, a);
 
 end
 )");

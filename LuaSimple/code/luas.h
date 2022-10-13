@@ -1195,7 +1195,7 @@ namespace luas
 			return i;
 		}
 
-		int push_userdata(void* v) const { if (v) lua_pushlightuserdata(_state, v); else lua_pushnil(_state); return 1; }
+		int push_userdata(void* v) const { if (v) lua_pushlightuserdata(_state, v); else push_nil(); return 1; }
 		int push_nil() const { lua_pushnil(_state); return 1; }
 		int push_value(int i) const { lua_pushvalue(_state, i); return 1; }
 		int get_top() const { return lua_gettop(_state); }
@@ -1210,6 +1210,7 @@ namespace luas
 
 		bool is_table(int i) const { return lua_istable(_state, i); }
 		bool is_function(int i) const { return lua_isfunction(_state, i); }
+		bool is_nil(int i) const { return lua_isnil(_state, i); }
 
 		value_ok<bool> to_bool(int i) const
 		{
@@ -1248,8 +1249,11 @@ namespace luas
 		template <typename T = void*>
 		T to_userdata(int i) const
 		{
+			if (is_nil(i))
+				return nullptr;
+
 			if (!lua_isuserdata(_state, i) && !lua_islightuserdata(_state, i))
-				return throw_error<std::nullptr_t>("Expected '{}' value, got '{}'", typeid(T).name(), LUA_GET_TYPENAME(i));
+				return throw_error<T>("Expected '{}' value, got '{}'", typeid(T).name(), LUA_GET_TYPENAME(i));
 
 			return reinterpret_cast<T>(lua_touserdata(_state, i));
 		}
