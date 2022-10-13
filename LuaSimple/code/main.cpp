@@ -145,27 +145,19 @@ int main()
 
 	//printf_s("0x%x\n", script.get()->get_global_var<std::string>("test").c_str());
 
-	script.add_function("getVec", [](const std::string& name)
+	script.add_function("getVec", [](vec3 v)
 	{
 		//return std::vector<int>({ 1, 2, 3, 4, 5 });
-		return vec3(-1.f, -2.f, -3.f);
+		printf_s("%.2f %.2f %.2f\n", v.x, v.y, v.z);
 	});
 
 	script.exec_string(R"(
 function test()
 
 	local a = vec3(1, 2, 3);
-	local a2 = vec3(10, 20, 30);
-	local a3 = vec3(10, 20, 30);
 
-	--local l = a:len();
-	local b = a:add(a2:add(a3));
+	getVec(a);
 
-	--b.y = b.y + l;
-
-	--print("------ " .. tostring(l) .. " -----");
-	--print(tostring(a.x) .. ", " .. tostring(a.y) .. ", " .. tostring(a.z));
-	print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));
 end
 )");
 
