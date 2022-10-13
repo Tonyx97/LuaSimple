@@ -154,20 +154,18 @@ int main()
 	script.exec_string(R"(
 function test()
 
-	local a3 = getVec("test");
-	print(a3.z);
-
-	--[[local a = vec3(1, 2, 3);
+	local a = vec3(1, 2, 3);
 	local a2 = vec3(10, 20, 30);
+	local a3 = vec3(10, 20, 30);
 
-	local l = a:len();
+	--local l = a:len();
 	local b = a:add(a2:add(a3));
 
-	b.y = b.y + l;
+	--b.y = b.y + l;
 
-	print("------ " .. tostring(l) .. " -----");
+	--print("------ " .. tostring(l) .. " -----");
 	--print(tostring(a.x) .. ", " .. tostring(a.y) .. ", " .. tostring(a.z));
-	print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));]]
+	print(tostring(b.x) .. ", " .. tostring(b.y) .. ", " .. tostring(b.z));
 end
 )");
 

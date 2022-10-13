@@ -527,7 +527,7 @@ namespace luas
 			return 1;
 		}
 
-		static int oop_obj_create(lua_State* L)	// todo - clean
+		static int oop_obj_create(lua_State* L)
 		{
 			state s(L);
 
@@ -536,7 +536,7 @@ namespace luas
 
 			int stack = s.get_top();
 
-			//s.push(OOP_CREATE_FN_NAME());
+			s.push(OOP_CREATE_FN_NAME());
 			s.get_raw(1);
 
 			if (s.is_function(-1))
@@ -864,6 +864,7 @@ namespace luas
 			set_field(-2, "Generic");
 			pop_n();
 		}
+
 		void begin_class()
 		{
 			push_table();
@@ -1029,8 +1030,10 @@ namespace luas
 
 				if constexpr (std::derived_from<Ix, property_wrapper_base>)
 				{
-					s->add_class_variable(v.key, [](lua_State* L)	// setter
+					s->add_class_variable(v.key, [](lua_State* L)
 					{
+						// setter
+
 						state s(L);
 
 						std::string field; s.pop(field);
@@ -1039,8 +1042,10 @@ namespace luas
 							return class_fn_caller<detail::keep_member_ptr_fn_v<decltype(Ix::s)>>::call(s, field_info->write);
 
 						return s.push_nil();
-					}, [](lua_State* L)	// getter
+					}, [](lua_State* L)
 					{
+						// getter
+
 						state s(L);
 
 						std::string field; s.pop(field);
