@@ -15,7 +15,7 @@
 
 # Possible Future Plans:
 
-Metables are an important feature as well, I'd like to implement them in the future when I need them.
+Metatables are an important feature as well, I'd like to implement them in the future when I need them.
 
 # Documentation
 # Global Variables
